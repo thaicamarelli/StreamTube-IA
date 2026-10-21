@@ -1,8 +1,8 @@
 ---
 scope_type: phase
 related_phases: [3]
-status: pending
-date: 2026-10-19
+status: decided
+date: 2026-10-21
 scope_description: "Backend video upload and processing: object storage, background job queue, upload-to-10GB strategy, worker-based metadata/thumbnail extraction, streaming/download delivery, and video processing status lifecycle."
 ---
 
@@ -42,7 +42,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (BullMQ + Redis)** — this is a single-producer/single-consumer background job (not a cross-service messaging need, ruling out C), and the project will clearly benefit from BullMQ's built-in retry/backoff for TD-06's processing-failure handling and its official `@nestjs/bullmq` integration. The one new Redis container is a small, well-understood addition (no config needed for this use case) compared to the risk of coupling queue throughput to the primary Postgres instance (Option B) for a workload — video processing jobs — that is expected to grow with the platform.
 
-**Decision:** _[pending]_
+**Decision:** A (BullMQ + Redis)
 
 ---
 
@@ -73,7 +73,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (single bucket, UUID-prefixed keys)** — the project has no per-asset-type policy requirement yet, and co-locating a video's assets under its own UUID keeps deletion and key-collision avoidance trivial, reusing the identifier scheme the project already committed to for entities. Client library: `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` (AWS SDK v3) with `forcePathStyle: true` — the standard, actively maintained way to talk to MinIO as an S3-compatible endpoint from Node.js; MinIO's own JS SDK (`minio` package) was considered but rejected because it is MinIO-specific, while the AWS SDK keeps the code portable to real S3 in production without rewriting the storage client, per the project's own framing of MinIO as a local stand-in for S3.
 
-**Decision:** _[pending]_
+**Decision:** B (Two buckets by asset type: `videos`, `thumbnails`) — chosen over the recommendation for the cleaner per-type separation. Deleting both assets for a video stays a single logical operation at the application layer (one service method firing both bucket deletes in parallel via `Promise.all`, keyed by the same video UUID in each bucket) — the two-bucket cost is bucket provisioning, not deletion complexity.
 
 ---
 
@@ -109,7 +109,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (presigned multipart upload)** — it is the only option that both reaches the 10GB target and keeps bytes off the API process entirely, and it is the native, portable S3 protocol (works unchanged against real AWS S3 later). Option C's extra resumability is a genuine but non-essential upgrade this phase does not require; it can be revisited later if partial-connection-failure resume becomes a hard product requirement. Depends on TD-02 (same storage client issues the presigned part URLs).
 
-**Decision:** _[pending]_
+**Decision:** A (Presigned multipart upload)
 
 ---
 
@@ -140,7 +140,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (native `child_process` + CLI binaries)** — the "obvious" choice (`fluent-ffmpeg`) is dead and actively unsafe to adopt in a new project; direct CLI invocation avoids that risk entirely, stays current with whatever FFmpeg version the worker image installs, and is a well-documented, standard pattern (`ffprobe -print_format json` is FFmpeg's own supported machine-readable interface). This also fully resolves both of this TD's capabilities together, since metadata extraction (`ffprobe`) and thumbnail generation (`ffmpeg -vframes 1`) are the same tool invoked two ways.
 
-**Decision:** _[pending]_
+**Decision:** A (Native `child_process` + FFmpeg/ffprobe CLI binaries)
 
 ---
 
@@ -171,7 +171,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option B (presigned GET redirect)** — it satisfies "streaming without full download" for free (S3-compatible storage already implements Range/206 correctly) and keeps the API off the bandwidth-heavy read path, consistent with the same performance concern that drove TD-03's upload decision. The authorization check (today: none beyond the video existing and being `ready`; later: Fase 04's visibility rules) happens before the redirect is issued, so moving the bytes off-API does not weaken access control. Download reuses the same mechanism with `response-content-disposition=attachment` set on the presigned URL instead of `inline`.
 
-**Decision:** _[pending]_
+**Decision:** B (Presigned GET redirect) — with a short TTL (~15 minutes) on the presigned URL and client-side reissue on expiry (the player requests a fresh redirect when a long video outlives the current URL's validity). Exposure risk is bounded by this TTL and, in this phase, moot in practice: there is no access-control rule yet for the redirect to bypass (anonymous viewing is a first-class platform feature per `docs/project-plan.md`; visibility rules only arrive in Fase 04). Revisit Option A (full API proxy) if Fase 04 introduces confidentiality needs stricter than "unlisted".
 
 ---
 
@@ -202,7 +202,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (simple enum + queue-level retry/backoff)** — it is the minimal model that satisfies both the draft pre-registration and the processing/failure capabilities, keeps the `videos` table as the single source of truth for status queries, and reuses TD-01's queue retry mechanism instead of building a parallel one. Option B's audit trail is a reasonable future addition but is not required by anything in scope today.
 
-**Decision:** _[pending]_
+**Decision:** B (Status enum + `video_processing_events` audit table) — chosen over the recommendation for observability into processing attempts/failures from the start.
 
 ---
 
@@ -210,9 +210,9 @@ _Subprojects in scope:_
 
 | ID | Scope | Decision | Recommendation | Choice |
 |----|-------|----------|---------------|--------|
-| TD-01 | Backend | Background Job Queue Technology | BullMQ + Redis | _[pending]_ |
-| TD-02 | Backend | Object Storage Access & Bucket/Key Organization | Single bucket, UUID-prefixed keys + AWS SDK v3 | _[pending]_ |
-| TD-03 | Backend | Large File Upload Strategy (up to 10GB) | Presigned multipart upload | _[pending]_ |
-| TD-04 | Backend | Video Processing Tooling (metadata & thumbnail) | Native `child_process` + FFmpeg/ffprobe CLI | _[pending]_ |
-| TD-05 | Backend | Streaming & Download Delivery Strategy | Presigned GET redirect (302) | _[pending]_ |
-| TD-06 | Backend | Video Processing Status Lifecycle & Failure Handling | Simple enum + queue-level retry/backoff | _[pending]_ |
+| TD-01 | Backend | Background Job Queue Technology | BullMQ + Redis | A (BullMQ + Redis) |
+| TD-02 | Backend | Object Storage Access & Bucket/Key Organization | Single bucket, UUID-prefixed keys + AWS SDK v3 | B (Two buckets by asset type) |
+| TD-03 | Backend | Large File Upload Strategy (up to 10GB) | Presigned multipart upload | A (Presigned multipart upload) |
+| TD-04 | Backend | Video Processing Tooling (metadata & thumbnail) | Native `child_process` + FFmpeg/ffprobe CLI | A (Native `child_process` + CLI) |
+| TD-05 | Backend | Streaming & Download Delivery Strategy | Presigned GET redirect (302) | B (Presigned GET redirect, short TTL + reissue) |
+| TD-06 | Backend | Video Processing Status Lifecycle & Failure Handling | Simple enum + queue-level retry/backoff | B (Status enum + audit events table) |
