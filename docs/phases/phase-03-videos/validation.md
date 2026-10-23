@@ -1,11 +1,11 @@
 ---
 kind: phase
 name: phase-03-videos
-status: dirty
+status: clean
 issue_count: 0
 sources_mtime:
-  docs/phases/phase-03-videos/context.md: "2026-10-21T20:45:48-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-21T20:37:36-03:00"
+  docs/phases/phase-03-videos/context.md: "2026-10-23T19:07:38-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-23T18:55:47-03:00"
 issues:
   - id: AMB-1
     status: resolved
@@ -23,23 +23,23 @@ _None._
 
 ### Ambiguities
 
-_None._
+_None._ AMB-1 (thumbnail frame selection) resolved via `/plan-resolve 3` — see Resolved Issues.
 
 ### Missing Decisions
 
-_None._ All 9 capability bullets are covered by at least one TD (see `## Capability Coverage` in context.md); no additional strategic decision was identified as missing.
+_None._ All 9 capability bullets are covered by at least one TD; all 6 TDs are decided with Libraries recorded.
 
 ### Dependency Gaps
 
-_None._ Phase 03's prerequisites from Fase 01 (config pattern) and Fase 02 (channel entity for video ownership, auth guards, error-envelope convention) are already delivered — no gap found.
+_None._
 
 ### Inherited Constraint Conflicts
 
-_None._ No current-scope TD contradicts an inherited convention or inherited TD.
+_None._
 
 ### Unresolved Open Questions
 
-_None._ All 6 TDs are decided; no screen inventory exists for this phase (backend-only, no UI scope), so no inventory-sourced open questions apply.
+_None._
 
 ### UI Coverage Gaps
 
