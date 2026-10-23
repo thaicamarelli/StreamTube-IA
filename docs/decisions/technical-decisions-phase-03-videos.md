@@ -44,6 +44,8 @@ _Subprojects in scope:_
 
 **Decision:** A (BullMQ + Redis)
 
+**Libraries:** @nestjs/bullmq, bullmq
+
 ---
 
 ## TD-02: Object Storage Access & Bucket/Key Organization
@@ -74,6 +76,8 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (single bucket, UUID-prefixed keys)** — the project has no per-asset-type policy requirement yet, and co-locating a video's assets under its own UUID keeps deletion and key-collision avoidance trivial, reusing the identifier scheme the project already committed to for entities. Client library: `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` (AWS SDK v3) with `forcePathStyle: true` — the standard, actively maintained way to talk to MinIO as an S3-compatible endpoint from Node.js; MinIO's own JS SDK (`minio` package) was considered but rejected because it is MinIO-specific, while the AWS SDK keeps the code portable to real S3 in production without rewriting the storage client, per the project's own framing of MinIO as a local stand-in for S3.
 
 **Decision:** B (Two buckets by asset type: `videos`, `thumbnails`) — chosen over the recommendation for the cleaner per-type separation. Deleting both assets for a video stays a single logical operation at the application layer (one service method firing both bucket deletes in parallel via `Promise.all`, keyed by the same video UUID in each bucket) — the two-bucket cost is bucket provisioning, not deletion complexity.
+
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
 
 ---
 
@@ -111,6 +115,8 @@ _Subprojects in scope:_
 
 **Decision:** A (Presigned multipart upload)
 
+**Libraries:** — (reuses TD-02's `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`, no additional package)
+
 ---
 
 ## TD-04: Video Processing Tooling (Metadata Extraction & Thumbnail Generation)
@@ -141,6 +147,10 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (native `child_process` + CLI binaries)** — the "obvious" choice (`fluent-ffmpeg`) is dead and actively unsafe to adopt in a new project; direct CLI invocation avoids that risk entirely, stays current with whatever FFmpeg version the worker image installs, and is a well-documented, standard pattern (`ffprobe -print_format json` is FFmpeg's own supported machine-readable interface). This also fully resolves both of this TD's capabilities together, since metadata extraction (`ffprobe`) and thumbnail generation (`ffmpeg -vframes 1`) are the same tool invoked two ways.
 
 **Decision:** A (Native `child_process` + FFmpeg/ffprobe CLI binaries)
+
+**Libraries:** — (`ffmpeg` is installed as an OS package in the worker's Docker image, not an npm dependency; `child_process` is a Node.js builtin)
+
+**Clarification (AMB-1, resolved via `/plan-resolve 3`):** thumbnail frame selection uses the **percentage-of-duration** rule — the worker extracts the frame at 10% of the video's total duration (computed from the `ffprobe`-reported duration), not a fixed timestamp or the first frame. This avoids black/fade-in frames at the very start regardless of video length. Resulting command shape: `ffmpeg -ss {duration * 0.1} -i <input> -vframes 1 <thumbnail>.jpg`.
 
 ---
 
@@ -173,6 +183,8 @@ _Subprojects in scope:_
 
 **Decision:** B (Presigned GET redirect) — with a short TTL (~15 minutes) on the presigned URL and client-side reissue on expiry (the player requests a fresh redirect when a long video outlives the current URL's validity). Exposure risk is bounded by this TTL and, in this phase, moot in practice: there is no access-control rule yet for the redirect to bypass (anonymous viewing is a first-class platform feature per `docs/project-plan.md`; visibility rules only arrive in Fase 04). Revisit Option A (full API proxy) if Fase 04 introduces confidentiality needs stricter than "unlisted".
 
+**Libraries:** — (reuses TD-02's `@aws-sdk/s3-request-presigner`, no additional package)
+
 ---
 
 ## TD-06: Video Processing Status Lifecycle & Failure Handling
@@ -203,6 +215,8 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (simple enum + queue-level retry/backoff)** — it is the minimal model that satisfies both the draft pre-registration and the processing/failure capabilities, keeps the `videos` table as the single source of truth for status queries, and reuses TD-01's queue retry mechanism instead of building a parallel one. Option B's audit trail is a reasonable future addition but is not required by anything in scope today.
 
 **Decision:** B (Status enum + `video_processing_events` audit table) — chosen over the recommendation for observability into processing attempts/failures from the start.
+
+**Libraries:** — (TypeORM entity/migration only, already in the stack)
 
 ---
 
