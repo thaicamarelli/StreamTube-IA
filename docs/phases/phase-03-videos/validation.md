@@ -2,14 +2,15 @@
 kind: phase
 name: phase-03-videos
 status: dirty
-issue_count: 1
+issue_count: 0
 sources_mtime:
   docs/phases/phase-03-videos/context.md: "2026-10-21T20:45:48-03:00"
   docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-21T20:37:36-03:00"
 issues:
   - id: AMB-1
-    status: open
+    status: resolved
     summary: "Thumbnail generation doesn't specify which video frame to extract"
+    resolved_by: clarification
 ---
 
 # phase-03-videos — Validation
@@ -22,7 +23,7 @@ _None._
 
 ### Ambiguities
 
-- **AMB-1** — Capability "Geração automática de thumbnail a partir de um frame do vídeo" doesn't specify *which* frame to extract (first frame, a fixed timestamp, a percentage into the duration, first non-black frame, etc.). `phase-03-videos/TD-04` only decided the tooling (`child_process` + FFmpeg/ffprobe), not this parameter — the exact `ffmpeg -ss <t> -vframes 1` command needs a concrete timestamp rule before it can be written. Explicit choice: resolve via `/plan-resolve 3` — pick one of (a) fixed timestamp (e.g., 1 second in), (b) percentage of total duration (e.g., 10%), (c) first frame (`-ss 0`), (d) first non-black/non-blank frame (requires extra FFmpeg filtering, more complex).
+_None._
 
 ### Missing Decisions
 
@@ -46,4 +47,4 @@ _None._ No UI scope detected for this phase (backend-only); this check does not 
 
 ## Resolved Issues
 
-_No issues resolved yet._
+- **AMB-1** _(resolved_by clarification)_ — Thumbnail frame selection resolved to the percentage-of-duration rule (10% of total duration, computed from `ffprobe`'s reported duration). Recorded as a clarification note on `phase-03-videos/TD-04` in the decisions doc and mirrored in `context.md`.

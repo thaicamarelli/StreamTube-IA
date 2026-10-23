@@ -3,7 +3,7 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-10-14T18:52:54-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-21T20:37:36-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-23T18:55:47-03:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-10-14T19:09:40-03:00"
   docs/phases/phase-01-configuracao-base/context.md: "2026-10-14T19:09:40-03:00"
   docs/phases/phase-02-auth/context.md: "2026-10-14T19:09:40-03:00"
@@ -48,8 +48,8 @@ sources_mtime:
 
 | Ref | Source | Scope | Topic | Status | Decision | Libraries |
 |-----|--------|-------|-------|--------|----------|-----------|
-| phase-03-videos/TD-01 | phase | Backend | Background Job Queue Technology | decided | A | — |
-| phase-03-videos/TD-02 | phase | Backend | Object Storage Access & Bucket/Key Organization | decided | B | — |
+| phase-03-videos/TD-01 | phase | Backend | Background Job Queue Technology | decided | A | @nestjs/bullmq, bullmq |
+| phase-03-videos/TD-02 | phase | Backend | Object Storage Access & Bucket/Key Organization | decided | B | @aws-sdk/client-s3, @aws-sdk/s3-request-presigner |
 | phase-03-videos/TD-03 | phase | Backend | Large File Upload Strategy (up to 10GB) | decided | A | — |
 | phase-03-videos/TD-04 | phase | Backend | Video Processing Tooling (metadata & thumbnail) | decided | A | — |
 | phase-03-videos/TD-05 | phase | Backend | Streaming & Download Delivery Strategy | decided | B | — |
@@ -79,13 +79,13 @@ _Source files:_
 
 **Recommendation:** this is a single-producer/single-consumer background job (not a cross-service messaging need, ruling out C), and the project will clearly benefit from BullMQ's built-in retry/backoff for TD-06's processing-failure handling and its official `@nestjs/bullmq` integration. The one new Redis container is a small, well-understood addition (no config needed for this use case) compared to the risk of coupling queue throughput to the primary Postgres instance (Option B) for a workload — video processing jobs — that is expected to grow with the platform.
 
-**Libraries:** —
+**Libraries:** @nestjs/bullmq, bullmq
 
 ### phase-03-videos/TD-02
 
 **Recommendation:** the project has no per-asset-type policy requirement yet, and co-locating a video's assets under its own UUID keeps deletion and key-collision avoidance trivial, reusing the identifier scheme the project already committed to for entities. Client library: `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` (AWS SDK v3) with `forcePathStyle: true`. **Chosen:** B (two buckets by asset type: `videos`, `thumbnails`) — deleting both assets for a video stays a single logical operation (one service method firing both bucket deletes in parallel via `Promise.all`, keyed by the same video UUID in each bucket).
 
-**Libraries:** —
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
 
 ### phase-03-videos/TD-03
 
@@ -98,6 +98,8 @@ _Source files:_
 **Recommendation:** the "obvious" choice (`fluent-ffmpeg`) is dead and actively unsafe to adopt in a new project (archived May 2025, unmaintained); direct CLI invocation avoids that risk entirely, stays current with whatever FFmpeg version the worker image installs, and is a well-documented, standard pattern (`ffprobe -print_format json`). This also fully resolves metadata extraction and thumbnail generation together, since both are the same tool invoked two ways.
 
 **Libraries:** —
+
+**Clarification (AMB-1, resolved via `/plan-resolve 3`):** thumbnail frame selection uses the percentage-of-duration rule — the worker extracts the frame at 10% of the video's total duration (computed from the `ffprobe`-reported duration), not a fixed timestamp or the first frame. Command shape: `ffmpeg -ss {duration * 0.1} -i <input> -vframes 1 <thumbnail>.jpg`.
 
 ### phase-03-videos/TD-05
 
