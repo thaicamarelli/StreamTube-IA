@@ -3,8 +3,11 @@ import { User } from '../users/entities/user.entity';
 import { Channel } from '../channels/entities/channel.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
+import { Video } from '../videos/entities/video.entity';
+import { VideoProcessingEvent } from '../videos/entities/video-processing-event.entity';
 import { CreateUsersAndChannels1775687773260 } from './migrations/1775687773260-CreateUsersAndChannels';
 import { CreateAuthTokens1777579850478 } from './migrations/1777579850478-CreateAuthTokens';
+import { CreateVideos1793200624302 } from './migrations/1793200624302-CreateVideos';
 import { createTestDataSource } from '../test/create-test-data-source';
 
 const MANAGED_TABLES = [
@@ -12,6 +15,8 @@ const MANAGED_TABLES = [
   'channels',
   'refresh_tokens',
   'verification_tokens',
+  'videos',
+  'video_processing_events',
 ];
 
 describe('Database migrations (integration)', () => {
@@ -19,12 +24,13 @@ describe('Database migrations (integration)', () => {
 
   beforeAll(async () => {
     dataSource = createTestDataSource(
-      [User, Channel, RefreshToken, VerificationToken],
+      [User, Channel, RefreshToken, VerificationToken, Video, VideoProcessingEvent],
       {
         synchronize: false,
         migrations: [
           CreateUsersAndChannels1775687773260,
           CreateAuthTokens1777579850478,
+          CreateVideos1793200624302,
         ],
       },
     );
@@ -39,6 +45,10 @@ describe('Database migrations (integration)', () => {
       dataSource.query(
         `DROP TYPE IF EXISTS "verification_tokens_type_enum" CASCADE`,
       ),
+      dataSource.query(`DROP TYPE IF EXISTS "videos_status_enum" CASCADE`),
+      dataSource.query(
+        `DROP TYPE IF EXISTS "video_processing_events_status_enum" CASCADE`,
+      ),
     ]);
   });
 
@@ -49,10 +59,10 @@ describe('Database migrations (integration)', () => {
     await dataSource.destroy();
   });
 
-  it('should apply all migrations and create all four tables', async () => {
+  it('should apply all migrations and create all six tables', async () => {
     const ranMigrations = await dataSource.runMigrations();
 
-    expect(ranMigrations).toHaveLength(2);
+    expect(ranMigrations).toHaveLength(3);
 
     const result = await dataSource.query<{ table_name: string }[]>(
       `SELECT table_name FROM information_schema.tables
@@ -67,17 +77,19 @@ describe('Database migrations (integration)', () => {
       'refresh_tokens',
       'users',
       'verification_tokens',
+      'video_processing_events',
+      'videos',
     ]);
   });
 
-  it('should revert the last migration and remove token tables', async () => {
+  it('should revert the last migration and remove video tables', async () => {
     await dataSource.undoLastMigration();
 
     const result = await dataSource.query<{ table_name: string }[]>(
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema = 'public'
          AND table_name = ANY($1::text[])`,
-      [['refresh_tokens', 'verification_tokens']],
+      [['videos', 'video_processing_events']],
     );
     expect(result).toHaveLength(0);
   });
