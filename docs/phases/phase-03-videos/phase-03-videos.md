@@ -165,7 +165,7 @@ Implementar o upload de vídeos de até 10GB sem passar os bytes pela API (uploa
 ### SI-03.6 — Endpoint: Iniciar Upload (POST /videos)
 
 **Route:** POST /videos
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-initiate-upload.plan.md`
 **Authorization:** Authenticated (rascunho criado sob o próprio canal do chamador)
 
 **Description:** Pré-cadastra o vídeo como rascunho e orquestra o início do upload multipart.
@@ -197,7 +197,7 @@ Implementar o upload de vídeos de até 10GB sem passar os bytes pela API (uploa
 ### SI-03.7 — Endpoint: Completar Upload (POST /videos/:id/complete)
 
 **Route:** POST /videos/:id/complete
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-complete-upload.plan.md`
 **Authorization:** Owner
 
 **Description:** Finaliza o upload multipart no storage e enfileira o processamento em segundo plano.
@@ -232,7 +232,7 @@ Implementar o upload de vídeos de até 10GB sem passar os bytes pela API (uploa
 **Route:** GET /videos/:id
 **Route:** GET /videos/:id/stream
 **Route:** GET /videos/:id/download
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-delivery.plan.md`
 **Authorization:** Anonymous (stream/download exigem `status: "ready"`)
 
 **Description:** Expõe a leitura do status do vídeo e a entrega por streaming/download via redirect pra URL pré-assinada.
