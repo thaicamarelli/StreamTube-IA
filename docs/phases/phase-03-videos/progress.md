@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 2/9 completed
+**SIs:** 3/9 completed
 
 ### SI-03.1 — Infra: MinIO, Redis, Worker Container e Config Namespaces
 - **Status:** completed
@@ -19,8 +19,8 @@
   - `migrations.integration-spec.ts` estendido: agora espera 3 migrações e 6 tabelas; o teste "revert last migration" passou a verificar a remoção de `videos`/`video_processing_events` (a nova última migração), não mais `refresh_tokens`/`verification_tokens`.
 
 ### SI-03.3 — Catálogo de Erros: Exceções de Domínio do Módulo de Vídeos
-- **Status:** pending
-- **Tests:** —
+- **Status:** completed
+- **Tests:** 6 passing
 - **Observations:** none
 
 ### SI-03.4 — Storage Module: Upload Multipart e URLs Pré-assinadas
