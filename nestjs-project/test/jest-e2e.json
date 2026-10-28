@@ -6,6 +6,9 @@
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
+  "transformIgnorePatterns": [
+    "node_modules/(?!(@nestjs/bullmq|@nestjs/bull-shared|bullmq)/)"
+  ],
   "setupFiles": ["dotenv/config"],
   "testTimeout": 15000
 }

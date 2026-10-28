@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 4/9 completed
+**SIs:** 5/9 completed
 
 ### SI-03.1 — Infra: MinIO, Redis, Worker Container e Config Namespaces
 - **Status:** completed
@@ -33,9 +33,12 @@
   - Um teste novo ("fewer parts than uploaded") partiu de premissa errada: `CompleteMultipartUpload` monta o objeto só com as partes *listadas* no pedido — submeter um subconjunto das partes enviadas é comportamento válido do S3, não erro. Corrigido pra testar o cenário que de fato falha (referenciar um `partNumber` nunca enviado).
 
 ### SI-03.5 — Queue Module: BullMQ Producer e Worker Scaffold
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 2 passing
+- **Observations:**
+  - `@nestjs/bullmq` é distribuído como ESM puro; o Jest exclui `node_modules` da transformação por padrão, quebrando o import com `SyntaxError: Unexpected token 'export'`. Corrigido com `transformIgnorePatterns` em `package.json` (jest config) e `test/jest-e2e.json` liberando `@nestjs/bullmq`, `@nestjs/bull-shared` e `bullmq`.
+  - `ioredis` precisou ser instalado como dependência direta — o BullMQ exige ele em runtime pra construir a conexão Redis, mas só aparecia como peer dependency transitiva, nunca instalada de fato.
+  - Seguindo a convenção do projeto de não mockar libs configuradas (`.claude/skills/testing-guide-nestjs-project`), os testes de compilação do módulo usam uma conexão Redis real (serviço `redis` do Compose), não um mock da fila.
 
 ### SI-03.6 — Endpoint: Iniciar Upload (POST /videos)
 - **Status:** pending
