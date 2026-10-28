@@ -8,6 +8,7 @@ import { VideoProcessingEvent } from '../videos/entities/video-processing-event.
 import { CreateUsersAndChannels1775687773260 } from './migrations/1775687773260-CreateUsersAndChannels';
 import { CreateAuthTokens1777579850478 } from './migrations/1777579850478-CreateAuthTokens';
 import { CreateVideos1793200624302 } from './migrations/1793200624302-CreateVideos';
+import { AddVideosChannelIdIndex1793201853195 } from './migrations/1793201853195-AddVideosChannelIdIndex';
 import { createTestDataSource } from '../test/create-test-data-source';
 
 const MANAGED_TABLES = [
@@ -31,6 +32,7 @@ describe('Database migrations (integration)', () => {
           CreateUsersAndChannels1775687773260,
           CreateAuthTokens1777579850478,
           CreateVideos1793200624302,
+          AddVideosChannelIdIndex1793201853195,
         ],
       },
     );
@@ -62,7 +64,7 @@ describe('Database migrations (integration)', () => {
   it('should apply all migrations and create all six tables', async () => {
     const ranMigrations = await dataSource.runMigrations();
 
-    expect(ranMigrations).toHaveLength(3);
+    expect(ranMigrations).toHaveLength(4);
 
     const result = await dataSource.query<{ table_name: string }[]>(
       `SELECT table_name FROM information_schema.tables
@@ -82,14 +84,12 @@ describe('Database migrations (integration)', () => {
     ]);
   });
 
-  it('should revert the last migration and remove video tables', async () => {
+  it('should revert the last migration and remove the channel_id index', async () => {
     await dataSource.undoLastMigration();
 
-    const result = await dataSource.query<{ table_name: string }[]>(
-      `SELECT table_name FROM information_schema.tables
-       WHERE table_schema = 'public'
-         AND table_name = ANY($1::text[])`,
-      [['videos', 'video_processing_events']],
+    const result = await dataSource.query<{ indexname: string }[]>(
+      `SELECT indexname FROM pg_indexes
+       WHERE tablename = 'videos' AND indexdef ILIKE '%channel_id%'`,
     );
     expect(result).toHaveLength(0);
   });

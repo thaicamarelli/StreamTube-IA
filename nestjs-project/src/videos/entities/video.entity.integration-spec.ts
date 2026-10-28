@@ -124,6 +124,28 @@ describe('Video entity (integration)', () => {
     ).rejects.toThrow();
   });
 
+  it('should reject a missing original_filename (not null constraint)', async () => {
+    const channel = await createChannel();
+
+    await expect(
+      dataSource.query(
+        `INSERT INTO "videos" ("channel_id", "storage_key") VALUES ($1, $2)`,
+        [channel.id, 'key-no-filename'],
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('should reject a missing storage_key (not null constraint)', async () => {
+    const channel = await createChannel();
+
+    await expect(
+      dataSource.query(
+        `INSERT INTO "videos" ("channel_id", "original_filename") VALUES ($1, $2)`,
+        [channel.id, 'a.mp4'],
+      ),
+    ).rejects.toThrow();
+  });
+
   it('should reject an invalid status value', async () => {
     const channel = await createChannel();
 
