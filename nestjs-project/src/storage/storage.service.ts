@@ -22,6 +22,20 @@ export interface CompletedPart {
 
 const PART_SIZE_BYTES = 100 * 1024 * 1024; // 100MB per part
 const GET_URL_TTL_SECONDS = 900; // 15 minutes, per phase-03-videos/TD-05
+// Part-upload URLs must stay valid for the whole upload window, not just a
+// single request — a 10GB upload (per TD-03) can take well over an hour on
+// typical connections, so this is deliberately much longer than the GET TTL.
+const PART_UPLOAD_URL_TTL_SECONDS = 24 * 60 * 60; // 24 hours
+
+// Builds a Content-Disposition value per RFC 6266: a quoted-string fallback
+// with embedded quotes/backslashes stripped (for older clients) plus a
+// filename*=UTF-8'' extended form so non-ASCII titles (e.g. Portuguese
+// accents) survive for clients that support it.
+function buildAttachmentDisposition(filename: string): string {
+  const asciiFallback = filename.replace(/["\\]/g, '');
+  const encoded = encodeURIComponent(filename);
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`;
+}
 
 @Injectable()
 export class StorageService {
@@ -83,7 +97,7 @@ export class StorageService {
         PartNumber: partNumber,
       });
       const url = await getSignedUrl(this.client, command, {
-        expiresIn: GET_URL_TTL_SECONDS,
+        expiresIn: PART_UPLOAD_URL_TTL_SECONDS,
       });
       parts.push({ partNumber, url });
     }
@@ -102,10 +116,15 @@ export class StorageService {
         Key: key,
         UploadId: uploadId,
         MultipartUpload: {
-          Parts: parts.map((part) => ({
-            PartNumber: part.partNumber,
-            ETag: part.eTag,
-          })),
+          // Real S3 requires parts in ascending PartNumber order; MinIO is
+          // more lenient, so this must be enforced here rather than relying
+          // on caller-supplied order.
+          Parts: [...parts]
+            .sort((a, b) => a.partNumber - b.partNumber)
+            .map((part) => ({
+              PartNumber: part.partNumber,
+              ETag: part.eTag,
+            })),
         },
       }),
     );
@@ -118,7 +137,7 @@ export class StorageService {
   ): Promise<string> {
     const contentDisposition =
       options.disposition === 'attachment'
-        ? `attachment; filename="${options.filename ?? key}"`
+        ? buildAttachmentDisposition(options.filename ?? key)
         : 'inline';
 
     const command = new GetObjectCommand({

@@ -49,7 +49,35 @@ describe('StorageService', () => {
     const parsed = new URL(url);
 
     expect(parsed.searchParams.get('response-content-disposition')).toBe(
-      'attachment; filename="meu-video.mp4"',
+      'attachment; filename="meu-video.mp4"; filename*=UTF-8\'\'meu-video.mp4',
     );
+  });
+
+  it('getPresignedGetUrl strips unsafe characters from the ASCII filename fallback', async () => {
+    const url = await service.getPresignedGetUrl('videos', 'some-key', {
+      disposition: 'attachment',
+      filename: 'ví"deo\\especial.mp4',
+    });
+    const parsed = new URL(url);
+    const disposition = parsed.searchParams.get(
+      'response-content-disposition',
+    )!;
+
+    expect(disposition).not.toContain('\\');
+    expect(disposition).toContain(
+      `filename*=UTF-8''${encodeURIComponent('ví"deo\\especial.mp4')}`,
+    );
+  });
+
+  it('getPresignedPartUrls signs part-upload URLs with a 24h TTL (longer than the GET TTL)', async () => {
+    const [part] = await service.getPresignedPartUrls(
+      'videos',
+      'some-key',
+      'fake-upload-id',
+      1,
+    );
+    const parsed = new URL(part.url);
+
+    expect(parsed.searchParams.get('X-Amz-Expires')).toBe('86400');
   });
 });

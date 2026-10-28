@@ -1,12 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import storageConfig from '../config/storage.config';
 import { StorageService } from './storage.service';
 
 describe('StorageService (integration)', () => {
   let service: StorageService;
   let rawClient: S3Client;
+  const createdKeys: string[] = [];
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -29,8 +30,24 @@ describe('StorageService (integration)', () => {
     });
   });
 
+  afterAll(async () => {
+    const bucket = service.videosBucket;
+    await Promise.all(
+      createdKeys.map((key) =>
+        rawClient
+          .send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
+          .catch(() => undefined),
+      ),
+    );
+  });
+
+  function trackKey(key: string): string {
+    createdKeys.push(key);
+    return key;
+  }
+
   it('completes a real multipart upload round-trip against MinIO', async () => {
-    const key = `test-object-${Date.now()}`;
+    const key = trackKey(`test-object-${Date.now()}`);
     const bucket = service.videosBucket;
     const content = Buffer.from('hello streamtube multipart upload');
 
@@ -64,21 +81,82 @@ describe('StorageService (integration)', () => {
     expect(body).toBe(content.toString());
   });
 
-  it('throws when completing with a mismatched part list', async () => {
-    const key = `test-object-invalid-${Date.now()}`;
+  it('completes a multi-part upload and tolerates parts submitted out of order', async () => {
+    const key = trackKey(`test-object-multipart-${Date.now()}`);
+    const bucket = service.videosBucket;
+    // Real S3 (and MinIO) require every part except the last to be >= 5MB.
+    const partA = Buffer.alloc(5 * 1024 * 1024, 'a');
+    const partB = Buffer.from('final smaller part');
+
+    const uploadId = await service.createMultipartUpload(bucket, key);
+    const parts = await service.getPresignedPartUrls(bucket, key, uploadId, 2);
+    expect(parts).toHaveLength(2);
+
+    const putA = await fetch(parts[0].url, { method: 'PUT', body: partA });
+    const putB = await fetch(parts[1].url, { method: 'PUT', body: partB });
+    expect(putA.status).toBe(200);
+    expect(putB.status).toBe(200);
+
+    // Submit deliberately out of order (part 2 before part 1) — the service
+    // must sort by partNumber before calling CompleteMultipartUpload.
+    await service.completeMultipartUpload(bucket, key, uploadId, [
+      { partNumber: 2, eTag: putB.headers.get('etag')! },
+      { partNumber: 1, eTag: putA.headers.get('etag')! },
+    ]);
+
+    const getResult = await rawClient.send(
+      new GetObjectCommand({ Bucket: bucket, Key: key }),
+    );
+    const body = await getResult.Body?.transformToByteArray();
+    expect(Buffer.from(body!).length).toBe(partA.length + partB.length);
+  });
+
+  it('throws an identifiable storage error when completing with a mismatched part list', async () => {
+    const key = trackKey(`test-object-invalid-${Date.now()}`);
     const bucket = service.videosBucket;
 
     const uploadId = await service.createMultipartUpload(bucket, key);
 
+    let caught: unknown;
+    try {
+      await service.completeMultipartUpload(bucket, key, uploadId, [
+        { partNumber: 1, eTag: '"not-a-real-etag"' },
+      ]);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).name).toBeTruthy();
+  });
+
+  it('throws when completing with a part number that was never uploaded', async () => {
+    const key = trackKey(`test-object-incomplete-${Date.now()}`);
+    const bucket = service.videosBucket;
+    const content = Buffer.from('only one part was actually uploaded');
+
+    const uploadId = await service.createMultipartUpload(bucket, key);
+    // Only part 1 is ever presigned and uploaded.
+    const [part] = await service.getPresignedPartUrls(bucket, key, uploadId, 1);
+    const putResponse = await fetch(part.url, { method: 'PUT', body: content });
+    const eTag = putResponse.headers.get('etag')!;
+
+    // Reference part 2, which was never created for this upload — storage
+    // has nothing to match it against and must reject the request. (Note:
+    // CompleteMultipartUpload only assembles the parts *listed* in the
+    // request — submitting a subset of the uploaded parts is valid S3
+    // behavior, not an error, so that scenario is intentionally not tested
+    // here as a failure case.)
     await expect(
       service.completeMultipartUpload(bucket, key, uploadId, [
-        { partNumber: 1, eTag: '"not-a-real-etag"' },
+        { partNumber: 1, eTag },
+        { partNumber: 2, eTag: '"never-uploaded"' },
       ]),
     ).rejects.toThrow();
   });
 
   it('getPresignedGetUrl returns a URL that is actually downloadable from MinIO', async () => {
-    const key = `test-object-get-${Date.now()}`;
+    const key = trackKey(`test-object-get-${Date.now()}`);
     const bucket = service.videosBucket;
     const content = Buffer.from('downloadable content');
 
