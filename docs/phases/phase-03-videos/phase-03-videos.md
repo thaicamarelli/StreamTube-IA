@@ -229,7 +229,9 @@ Implementar o upload de vídeos de até 10GB sem passar os bytes pela API (uploa
 
 ### SI-03.8 — Endpoints de Leitura e Entrega (GET /videos/:id, /stream, /download)
 
-**Routes:** GET /videos/:id, GET /videos/:id/stream, GET /videos/:id/download
+**Route:** GET /videos/:id
+**Route:** GET /videos/:id/stream
+**Route:** GET /videos/:id/download
 **Test Specs:** _pending /plan-test-specs_
 **Authorization:** Anonymous (stream/download exigem `status: "ready"`)
 
