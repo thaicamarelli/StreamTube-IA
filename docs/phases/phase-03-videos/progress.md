@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 3/9 completed
+**SIs:** 4/9 completed
 
 ### SI-03.1 — Infra: MinIO, Redis, Worker Container e Config Namespaces
 - **Status:** completed
@@ -24,9 +24,11 @@
 - **Observations:** none
 
 ### SI-03.4 — Storage Module: Upload Multipart e URLs Pré-assinadas
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 7 passing
+- **Observations:**
+  - `getPresignedGetUrl` é pura (assinatura local, sem round-trip de rede), então o teste unitário inspeciona a URL assinada de verdade (query params `response-content-disposition`/`X-Amz-Expires`) em vez de mockar o `S3Client`.
+  - Tamanho de parte fixado em 100MB (`PART_SIZE_BYTES`); não é um valor citado no plano, foi uma escolha de implementação dentro do que a TD-03 deixou aberto (orquestração do multipart).
 
 ### SI-03.5 — Queue Module: BullMQ Producer e Worker Scaffold
 - **Status:** pending
