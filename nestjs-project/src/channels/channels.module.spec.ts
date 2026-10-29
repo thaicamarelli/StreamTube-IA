@@ -6,8 +6,17 @@ import { User } from '../users/entities/user.entity';
 import { createTestDataSource } from '../test/create-test-data-source';
 import { Channel } from './entities/channel.entity';
 import { ChannelsModule } from './channels.module';
+import { Video } from '../videos/entities/video.entity';
+import { VideoProcessingEvent } from '../videos/entities/video-processing-event.entity';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  VideoProcessingEvent,
+];
 
 describe('ChannelsModule', () => {
   it('should compile with TypeOrmModule.forFeature([Channel]) and ChannelsService', async () => {

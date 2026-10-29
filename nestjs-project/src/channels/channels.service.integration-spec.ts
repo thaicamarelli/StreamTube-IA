@@ -8,8 +8,17 @@ import {
 import { User } from '../users/entities/user.entity';
 import { ChannelsService } from './channels.service';
 import { Channel } from './entities/channel.entity';
+import { Video } from '../videos/entities/video.entity';
+import { VideoProcessingEvent } from '../videos/entities/video-processing-event.entity';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  VideoProcessingEvent,
+];
 
 describe('ChannelsService (integration)', () => {
   let dataSource: DataSource;
@@ -22,7 +31,7 @@ describe('ChannelsService (integration)', () => {
     await dataSource.initialize();
     userRepository = dataSource.getRepository(User);
     channelRepository = dataSource.getRepository(Channel);
-    channelsService = new ChannelsService(dataSource);
+    channelsService = new ChannelsService(dataSource, channelRepository);
   });
 
   afterAll(async () => {
@@ -87,6 +96,28 @@ describe('ChannelsService (integration)', () => {
 
       const channels = await channelRepository.find();
       expect(channels).toHaveLength(2);
+    });
+  });
+
+  describe('findByUserId', () => {
+    it('returns the channel belonging to the given user', async () => {
+      const user = await createUser();
+      const created = await channelsService.createChannel(
+        user.id,
+        'findme@example.com',
+      );
+
+      const found = await channelsService.findByUserId(user.id);
+
+      expect(found?.id).toBe(created.id);
+    });
+
+    it('returns null when the user has no channel', async () => {
+      const found = await channelsService.findByUserId(
+        '00000000-0000-0000-0000-000000000000',
+      );
+
+      expect(found).toBeNull();
     });
   });
 });

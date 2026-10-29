@@ -10,8 +10,17 @@ import { createTestDataSource } from '../test/create-test-data-source';
 import { AuthModule } from './auth.module';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { VerificationToken } from './entities/verification-token.entity';
+import { Video } from '../videos/entities/video.entity';
+import { VideoProcessingEvent } from '../videos/entities/video-processing-event.entity';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  VideoProcessingEvent,
+];
 
 describe('AuthModule', () => {
   it('should compile successfully with JwtModule, TypeOrmModule, UsersModule, and MailModule', async () => {

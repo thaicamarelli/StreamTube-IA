@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 5/9 completed
+**SIs:** 6/9 completed
 
 ### SI-03.1 — Infra: MinIO, Redis, Worker Container e Config Namespaces
 - **Status:** completed
@@ -41,9 +41,13 @@
   - Seguindo a convenção do projeto de não mockar libs configuradas (`.claude/skills/testing-guide-nestjs-project`), os testes de compilação do módulo usam uma conexão Redis real (serviço `redis` do Compose), não um mock da fila.
 
 ### SI-03.6 — Endpoint: Iniciar Upload (POST /videos)
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 13 passing (4 unit + 2 integration em `videos.service`; 3 e2e em `videos-initiate-upload`; 2 unit + 2 integration novos em `ChannelsService.findByUserId`)
+- **Observations:**
+  - `CreateVideoDto.fileSizeBytes` deliberadamente não usa `@Max(10GB)` — um limite de schema geraria um erro de validação genérico em vez do `FILE_TOO_LARGE` (400) específico exigido pelo Error Catalog. O limite de 10GB é verificado em `VideosService.initiateUpload` e lança `FileTooLargeException`.
+  - `ChannelsService` ganhou um segundo parâmetro de construtor (`channelRepository`, via `@InjectRepository(Channel)`) para suportar `findByUserId`. Isso quebrou todo arquivo que instanciava `new ChannelsService(dataSource)` com um único argumento, e todo `ALL_ENTITIES` de teste que incluía `Channel` sem `Video`/`VideoProcessingEvent` (a nova relação `@OneToMany` de `Channel` para `Video` exige que `Video` esteja registrado no mesmo DataSource). Afetou 10 arquivos fora do escopo direto da SI: `channels.module.spec.ts`, `channels.service.integration-spec.ts`, `channel.entity.integration-spec.ts`, `user.entity.integration-spec.ts`, `users.module.spec.ts`, `users.service.integration-spec.ts` (+ 2 call sites de `ChannelsService`), `verification-token.entity.integration-spec.ts`, `refresh-token.entity.integration-spec.ts`, `auth.service.integration-spec.ts`, `auth.module.spec.ts`. Todos corrigidos e revalidados.
+  - Bug real encontrado ao rodar a suíte completa (não relacionado à SI em si, mas exposto por ela): `migrations.integration-spec.ts` fazia os `DROP TABLE ... CASCADE` do `beforeAll` via `Promise.all`, disparando múltiplas conexões concorrentes do pool. Com a nova FK `videos.channel_id -> channels.id`, isso passou a causar `deadlock detected` real no Postgres (um DROP CASCADE em `channels` conflitava com o DROP direto em `videos`/`video_processing_events` rodando em paralelo). Corrigido trocando para drops sequenciais (`for...of` com `await`).
+  - Suíte completa (33 suites / 192 testes) e e2e (4 suites / 55 testes) revalidadas 100% verdes após as correções acima; `tsc --noEmit` limpo.
 
 ### SI-03.7 — Endpoint: Completar Upload (POST /videos/:id/complete)
 - **Status:** pending
