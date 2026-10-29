@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import {
+  AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   GetObjectCommand,
@@ -126,6 +127,20 @@ export class StorageService {
               ETag: part.eTag,
             })),
         },
+      }),
+    );
+  }
+
+  async abortMultipartUpload(
+    bucket: string,
+    key: string,
+    uploadId: string,
+  ): Promise<void> {
+    await this.client.send(
+      new AbortMultipartUploadCommand({
+        Bucket: bucket,
+        Key: key,
+        UploadId: uploadId,
       }),
     );
   }

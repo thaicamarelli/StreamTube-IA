@@ -6,7 +6,10 @@ import { ChannelsService } from '../channels/channels.service';
 import { StorageService } from '../storage/storage.service';
 import { Video } from './entities/video.entity';
 import { CreateVideoDto } from './dto/create-video.dto';
-import { FileTooLargeException } from './exceptions/video.exceptions';
+import {
+  ChannelNotFoundException,
+  FileTooLargeException,
+} from './exceptions/video.exceptions';
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 * 1024; // 10GB, per phase-03-videos/TD-03
 
@@ -36,7 +39,7 @@ export class VideosService {
 
     const channel = await this.channelsService.findByUserId(userId);
     if (!channel) {
-      throw new Error(`No channel found for user ${userId}`);
+      throw new ChannelNotFoundException();
     }
 
     // The video's own UUID doubles as the storage key (per
@@ -44,31 +47,44 @@ export class VideosService {
     // the DB default — storage orchestration needs the id before the row
     // is fully persisted.
     const videoId = randomUUID();
-
-    const video = this.videoRepository.create({
-      id: videoId,
-      channel_id: channel.id,
-      original_filename: dto.originalFilename,
-      storage_key: videoId,
-    });
-    await this.videoRepository.save(video);
-
     const bucket = this.storageService.videosBucket;
+
+    // Storage is orchestrated before any DB write: if nothing has been
+    // persisted yet, a failure here needs no compensation. Once the
+    // multipart upload exists in storage, every subsequent failure path
+    // aborts it instead of leaving an orphaned upload with no tracking row.
     const uploadId = await this.storageService.createMultipartUpload(
       bucket,
       videoId,
     );
-    const partCount = this.storageService.partCountForSize(
-      dto.fileSizeBytes,
-    );
-    const parts = await this.storageService.getPresignedPartUrls(
-      bucket,
-      videoId,
-      uploadId,
-      partCount,
-    );
 
-    await this.videoRepository.update(videoId, { upload_id: uploadId });
+    let parts: { partNumber: number; url: string }[];
+    try {
+      const partCount = this.storageService.partCountForSize(dto.fileSizeBytes);
+      parts = await this.storageService.getPresignedPartUrls(
+        bucket,
+        videoId,
+        uploadId,
+        partCount,
+      );
+    } catch (error) {
+      await this.storageService.abortMultipartUpload(bucket, videoId, uploadId);
+      throw error;
+    }
+
+    try {
+      const video = this.videoRepository.create({
+        id: videoId,
+        channel_id: channel.id,
+        original_filename: dto.originalFilename,
+        storage_key: videoId,
+        upload_id: uploadId,
+      });
+      await this.videoRepository.save(video);
+    } catch (error) {
+      await this.storageService.abortMultipartUpload(bucket, videoId, uploadId);
+      throw error;
+    }
 
     return {
       id: videoId,

@@ -6,6 +6,7 @@ import {
   UploadAlreadyCompletedException,
   IncompleteMultipartUploadException,
   FileTooLargeException,
+  ChannelNotFoundException,
 } from './video.exceptions';
 
 describe('Video domain exceptions', () => {
@@ -43,9 +44,7 @@ describe('Video domain exceptions', () => {
     expect(exception).toBeInstanceOf(DomainException);
     expect(exception.errorCode).toBe('UPLOAD_ALREADY_COMPLETED');
     expect(exception.httpStatus).toBe(409);
-    expect(exception.message).toBe(
-      'Video upload has already been completed',
-    );
+    expect(exception.message).toBe('Video upload has already been completed');
     expect(exception.name).toBe('UploadAlreadyCompletedException');
   });
 
@@ -67,5 +66,16 @@ describe('Video domain exceptions', () => {
     expect(exception.httpStatus).toBe(400);
     expect(exception.message).toBe('File size exceeds the 10GB limit');
     expect(exception.name).toBe('FileTooLargeException');
+  });
+
+  it('ChannelNotFoundException exposes errorCode 404', () => {
+    const exception = new ChannelNotFoundException();
+    expect(exception).toBeInstanceOf(DomainException);
+    expect(exception.errorCode).toBe('CHANNEL_NOT_FOUND');
+    expect(exception.httpStatus).toBe(404);
+    expect(exception.message).toBe(
+      'No channel found for the authenticated user',
+    );
+    expect(exception.name).toBe('ChannelNotFoundException');
   });
 });

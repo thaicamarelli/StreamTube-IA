@@ -23,7 +23,7 @@ export class VideosController {
   @ApiOperation({
     summary: 'Initiate a video upload',
     description:
-      'Pre-registers the video as a draft under the caller\'s channel and ' +
+      "Pre-registers the video as a draft under the caller's channel and " +
       'returns presigned URLs to upload each part directly to storage.',
   })
   @ApiResponse({

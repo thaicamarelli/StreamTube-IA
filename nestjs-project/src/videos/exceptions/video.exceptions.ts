@@ -47,3 +47,13 @@ export class FileTooLargeException extends DomainException {
     super('FILE_TOO_LARGE', 400, 'File size exceeds the 10GB limit');
   }
 }
+
+export class ChannelNotFoundException extends DomainException {
+  constructor() {
+    super(
+      'CHANNEL_NOT_FOUND',
+      404,
+      'No channel found for the authenticated user',
+    );
+  }
+}

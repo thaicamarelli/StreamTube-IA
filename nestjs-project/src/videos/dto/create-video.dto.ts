@@ -1,9 +1,10 @@
-import { IsInt, IsNotEmpty, IsString, Min } from 'class-validator';
+import { IsInt, IsNotEmpty, IsString, MaxLength, Min } from 'class-validator';
 
 export class CreateVideoDto {
   /** The original file name as provided by the client. */
   @IsString()
   @IsNotEmpty()
+  @MaxLength(255)
   originalFilename: string;
 
   /**

@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
-import { DeleteObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import storageConfig from '../config/storage.config';
 import { StorageService } from './storage.service';
 
@@ -54,12 +58,7 @@ describe('StorageService (integration)', () => {
     const uploadId = await service.createMultipartUpload(bucket, key);
     expect(uploadId).toBeTruthy();
 
-    const [part] = await service.getPresignedPartUrls(
-      bucket,
-      key,
-      uploadId,
-      1,
-    );
+    const [part] = await service.getPresignedPartUrls(bucket, key, uploadId, 1);
     expect(part.url).toContain('X-Amz-Signature');
 
     const putResponse = await fetch(part.url, {
@@ -155,18 +154,35 @@ describe('StorageService (integration)', () => {
     ).rejects.toThrow();
   });
 
+  it('abortMultipartUpload actually cancels the upload in MinIO', async () => {
+    const key = trackKey(`test-object-abort-${Date.now()}`);
+    const bucket = service.videosBucket;
+
+    const uploadId = await service.createMultipartUpload(bucket, key);
+    const [part] = await service.getPresignedPartUrls(bucket, key, uploadId, 1);
+    const putResponse = await fetch(part.url, {
+      method: 'PUT',
+      body: Buffer.from('part that will never be completed'),
+    });
+    const eTag = putResponse.headers.get('etag')!;
+
+    await service.abortMultipartUpload(bucket, key, uploadId);
+
+    // The upload no longer exists in storage, so completing it must fail.
+    await expect(
+      service.completeMultipartUpload(bucket, key, uploadId, [
+        { partNumber: 1, eTag },
+      ]),
+    ).rejects.toThrow();
+  });
+
   it('getPresignedGetUrl returns a URL that is actually downloadable from MinIO', async () => {
     const key = trackKey(`test-object-get-${Date.now()}`);
     const bucket = service.videosBucket;
     const content = Buffer.from('downloadable content');
 
     const uploadId = await service.createMultipartUpload(bucket, key);
-    const [part] = await service.getPresignedPartUrls(
-      bucket,
-      key,
-      uploadId,
-      1,
-    );
+    const [part] = await service.getPresignedPartUrls(bucket, key, uploadId, 1);
     const putResponse = await fetch(part.url, {
       method: 'PUT',
       body: content,

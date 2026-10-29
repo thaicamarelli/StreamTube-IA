@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { DataSource, Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { Channel } from '../channels/entities/channel.entity';
+import { randomUUID } from 'node:crypto';
 import { ChannelsService } from '../channels/channels.service';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
@@ -15,6 +16,7 @@ import { StorageService } from '../storage/storage.service';
 import { Video } from './entities/video.entity';
 import { VideoProcessingEvent } from './entities/video-processing-event.entity';
 import { VideosService } from './videos.service';
+import { ChannelNotFoundException } from './exceptions/video.exceptions';
 
 const ALL_ENTITIES = [
   User,
@@ -113,6 +115,20 @@ describe('VideosService (integration)', () => {
         fileSizeBytes: 10 * 1024 * 1024 * 1024 + 1,
       }),
     ).rejects.toThrow();
+
+    const count = await videoRepository.count();
+    expect(count).toBe(0);
+  });
+
+  it('throws ChannelNotFoundException for an authenticated user with no channel, without creating a row', async () => {
+    const orphanUserId = randomUUID();
+
+    await expect(
+      videosService.initiateUpload(orphanUserId, {
+        originalFilename: 'orphan.mp4',
+        fileSizeBytes: 2048,
+      }),
+    ).rejects.toThrow(ChannelNotFoundException);
 
     const count = await videoRepository.count();
     expect(count).toBe(0);
