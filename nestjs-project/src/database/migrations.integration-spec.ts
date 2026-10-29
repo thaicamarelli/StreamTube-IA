@@ -25,7 +25,14 @@ describe('Database migrations (integration)', () => {
 
   beforeAll(async () => {
     dataSource = createTestDataSource(
-      [User, Channel, RefreshToken, VerificationToken, Video, VideoProcessingEvent],
+      [
+        User,
+        Channel,
+        RefreshToken,
+        VerificationToken,
+        Video,
+        VideoProcessingEvent,
+      ],
       {
         synchronize: false,
         migrations: [
@@ -39,19 +46,20 @@ describe('Database migrations (integration)', () => {
 
     await dataSource.initialize();
 
-    await Promise.all([
-      ...MANAGED_TABLES.map((table) =>
-        dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`),
-      ),
-      dataSource.query(`DROP TABLE IF EXISTS "migrations" CASCADE`),
-      dataSource.query(
-        `DROP TYPE IF EXISTS "verification_tokens_type_enum" CASCADE`,
-      ),
-      dataSource.query(`DROP TYPE IF EXISTS "videos_status_enum" CASCADE`),
-      dataSource.query(
-        `DROP TYPE IF EXISTS "video_processing_events_status_enum" CASCADE`,
-      ),
-    ]);
+    // Dropped sequentially, not via Promise.all: concurrent CASCADE drops
+    // across FK-related tables (e.g. channels -> videos) run on different
+    // pool connections and can deadlock against each other in Postgres.
+    for (const table of MANAGED_TABLES) {
+      await dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`);
+    }
+    await dataSource.query(`DROP TABLE IF EXISTS "migrations" CASCADE`);
+    await dataSource.query(
+      `DROP TYPE IF EXISTS "verification_tokens_type_enum" CASCADE`,
+    );
+    await dataSource.query(`DROP TYPE IF EXISTS "videos_status_enum" CASCADE`);
+    await dataSource.query(
+      `DROP TYPE IF EXISTS "video_processing_events_status_enum" CASCADE`,
+    );
   });
 
   afterAll(async () => {
