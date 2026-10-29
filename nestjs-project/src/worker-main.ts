@@ -4,8 +4,15 @@ import { WorkerModule } from './worker/worker.module';
 
 const logger = new Logger('Worker');
 
-async function bootstrap() {
-  await NestFactory.createApplicationContext(WorkerModule);
+export async function bootstrap() {
+  const app = await NestFactory.createApplicationContext(WorkerModule);
   logger.log('Video processing worker started');
+  return app;
 }
-void bootstrap();
+
+if (require.main === module) {
+  bootstrap().catch((error) => {
+    logger.error('Video processing worker failed to start', error);
+    process.exit(1);
+  });
+}

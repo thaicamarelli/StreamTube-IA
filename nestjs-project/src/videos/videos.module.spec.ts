@@ -1,7 +1,8 @@
 import { Test } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
-import { BullModule } from '@nestjs/bullmq';
+import { BullModule, getQueueToken } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { User } from '../users/entities/user.entity';
 import { Channel } from '../channels/entities/channel.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
@@ -11,6 +12,7 @@ import { VideoProcessingEvent } from './entities/video-processing-event.entity';
 import { createTestDataSource } from '../test/create-test-data-source';
 import storageConfig from '../config/storage.config';
 import { VideosModule } from './videos.module';
+import { VIDEO_PROCESSING_QUEUE } from './videos.constants';
 
 const ALL_ENTITIES = [
   User,
@@ -38,6 +40,11 @@ describe('VideosModule', () => {
     }).compile();
 
     expect(module).toBeDefined();
+
+    const queue = module.get<Queue>(getQueueToken(VIDEO_PROCESSING_QUEUE));
+    expect(queue).toBeDefined();
+    expect(queue.name).toBe(VIDEO_PROCESSING_QUEUE);
+
     await module.close();
   }, 30000);
 });
