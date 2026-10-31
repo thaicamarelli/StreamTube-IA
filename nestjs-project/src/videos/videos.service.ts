@@ -140,10 +140,15 @@ export class VideosService {
       throw new IncompleteMultipartUploadException();
     }
 
+    // Enqueued before the status update: BullMQ persists the job in Redis
+    // durably once add() resolves, so a failure here leaves the video in
+    // draft with nothing enqueued — a safe, visible state. Doing it in the
+    // opposite order would risk a video stuck in "processing" forever with
+    // no job tracking it, if the DB write succeeded but the enqueue failed.
+    await this.videoProcessingQueue.add(VIDEO_PROCESS_JOB_NAME, { videoId });
+
     await this.videoRepository.update(videoId, {
       status: VideoStatus.PROCESSING,
     });
-
-    await this.videoProcessingQueue.add(VIDEO_PROCESS_JOB_NAME, { videoId });
   }
 }

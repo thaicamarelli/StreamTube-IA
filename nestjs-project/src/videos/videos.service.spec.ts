@@ -273,6 +273,30 @@ describe('VideosService', () => {
       expect(queue.add).toHaveBeenCalledWith(VIDEO_PROCESS_JOB_NAME, {
         videoId: 'video-id',
       });
+
+      const addOrder = queue.add.mock.invocationCallOrder[0];
+      const updateOrder = repository.update.mock.invocationCallOrder[0];
+      expect(addOrder).toBeLessThan(updateOrder);
+    });
+
+    it('leaves the video in draft and does not update status when enqueueing the job fails', async () => {
+      const repository = makeRepository();
+      const storageService = makeStorageService();
+      const queue = makeQueue({
+        add: jest.fn().mockRejectedValue(new Error('redis unavailable')),
+      });
+      const service = new VideosService(
+        repository,
+        makeChannelsService(),
+        storageService,
+        queue,
+      );
+
+      await expect(
+        service.completeUpload('user-id', 'video-id', validDto),
+      ).rejects.toThrow('redis unavailable');
+
+      expect(repository.update).not.toHaveBeenCalled();
     });
 
     it('throws VideoNotFoundException when the video does not exist', async () => {

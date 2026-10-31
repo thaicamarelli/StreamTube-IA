@@ -199,5 +199,28 @@ describe('videos-complete-upload', () => {
       expect(response.status).toBe(400);
       expect(response.body.error).toBe('INCOMPLETE_MULTIPART_UPLOAD');
     });
+
+    it('1.7 empty-parts-array-returns-validation-error', async () => {
+      const { accessToken } = await registerConfirmAndLogin();
+      const { videoId } = await createDraftWithUploadedPart(accessToken);
+
+      const response = await request(app.getHttpServer())
+        .post(`/videos/${videoId}/complete`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ parts: [] });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('1.8 malformed-video-id-returns-bad-request', async () => {
+      const { accessToken } = await registerConfirmAndLogin();
+
+      const response = await request(app.getHttpServer())
+        .post('/videos/not-a-uuid/complete')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ parts: [{ partNumber: 1, eTag: '"irrelevant"' }] });
+
+      expect(response.status).toBe(400);
+    });
   });
 });
