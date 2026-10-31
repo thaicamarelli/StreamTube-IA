@@ -1,15 +1,27 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { Repository } from 'typeorm';
 import { ChannelsService } from '../channels/channels.service';
 import { StorageService } from '../storage/storage.service';
-import { Video } from './entities/video.entity';
+import { Video, VideoStatus } from './entities/video.entity';
 import { CreateVideoDto } from './dto/create-video.dto';
+import { CompleteVideoUploadDto } from './dto/complete-video-upload.dto';
 import {
   ChannelNotFoundException,
   FileTooLargeException,
+  ForbiddenNotOwnerException,
+  IncompleteMultipartUploadException,
+  UploadAlreadyCompletedException,
+  VideoNotFoundException,
 } from './exceptions/video.exceptions';
+import {
+  VIDEO_PROCESSING_QUEUE,
+  VIDEO_PROCESS_JOB_NAME,
+} from './videos.constants';
+import type { VideoProcessJobData } from './video-processing.consumer';
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 * 1024; // 10GB, per phase-03-videos/TD-03
 
@@ -27,6 +39,8 @@ export class VideosService {
     private readonly videoRepository: Repository<Video>,
     private readonly channelsService: ChannelsService,
     private readonly storageService: StorageService,
+    @InjectQueue(VIDEO_PROCESSING_QUEUE)
+    private readonly videoProcessingQueue: Queue<VideoProcessJobData>,
   ) {}
 
   async initiateUpload(
@@ -92,5 +106,44 @@ export class VideosService {
       parts,
       partSizeBytes: this.storageService.partSizeBytes,
     };
+  }
+
+  async completeUpload(
+    userId: string,
+    videoId: string,
+    dto: CompleteVideoUploadDto,
+  ): Promise<void> {
+    const video = await this.videoRepository.findOneBy({ id: videoId });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+
+    const channel = await this.channelsService.findByUserId(userId);
+    if (!channel || channel.id !== video.channel_id) {
+      throw new ForbiddenNotOwnerException();
+    }
+
+    if (video.status !== VideoStatus.DRAFT) {
+      throw new UploadAlreadyCompletedException();
+    }
+
+    try {
+      await this.storageService.completeMultipartUpload(
+        this.storageService.videosBucket,
+        video.storage_key,
+        // Set on every draft row by initiateUpload — never null while
+        // status is still draft.
+        video.upload_id as string,
+        dto.parts,
+      );
+    } catch {
+      throw new IncompleteMultipartUploadException();
+    }
+
+    await this.videoRepository.update(videoId, {
+      status: VideoStatus.PROCESSING,
+    });
+
+    await this.videoProcessingQueue.add(VIDEO_PROCESS_JOB_NAME, { videoId });
   }
 }

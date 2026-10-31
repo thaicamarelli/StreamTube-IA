@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 6/9 completed
+**SIs:** 7/9 completed
 
 ### SI-03.1 — Infra: MinIO, Redis, Worker Container e Config Namespaces
 - **Status:** completed
@@ -53,9 +53,14 @@
   - Contagem de erros de lint subiu de 150 (baseline anterior) pra 207 — crescimento esperado, não uma regressão de categoria nova: os testes novos seguem o mesmo padrão já estabelecido no projeto (mocks tipados como `any` em `.spec.ts`, `response.body` não tipado em `.e2e-spec.ts`), que já gera os mesmos `no-unsafe-member-access`/`no-unsafe-assignment` em todo o resto da suite de testes (ex: `auth.service.spec.ts` já tinha 45, `auth.e2e-spec.ts` já tinha 48). Fica dentro da decisão já tomada de deferir todo o lint pra fase de encerramento.
 
 ### SI-03.7 — Endpoint: Completar Upload (POST /videos/:id/complete)
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 17 passing (6 unit + 5 integration em `VideosService.completeUpload`; 6 e2e em `videos-complete-upload`)
+- **Observations:**
+  - `VideosService.completeUpload(userId, videoId, dto)` resolve o canal do chamador via `ChannelsService.findByUserId` (mesmo padrão de `initiateUpload`) em vez de receber `callerChannelId` já resolvido como o texto do plano sugeria — manter a resolução dentro do service evita vazar essa lógica de autorização pro controller (thin controller, per `nestjs-layer-separation.md`). Chamador sem canal nenhum também cai em `ForbiddenNotOwnerException` (não `ChannelNotFoundException` — este endpoint é owner-only, então "não tem canal" e "não é o dono" são o mesmo caso de borda do ponto de vista do Error Catalog).
+  - Ordem de validação segue exatamente a do plano: existência (`VideoNotFoundException`, 404) → ownership (`ForbiddenNotOwnerException`, 403) → status `draft` (`UploadAlreadyCompletedException`, 409) → `StorageService.completeMultipartUpload` (erro mapeado pra `IncompleteMultipartUploadException`, 400) → `status: processing` → enfileira `video.process` na fila `video-processing`.
+  - Erro do storage não avança estado nenhum: se `completeMultipartUpload` falha, nem o `status` do vídeo muda nem o job é enfileirado (testado explicitamente nos 3 níveis — unit, integration, e2e).
+  - Teste de integração usa fila BullMQ real (Redis do Compose) via `BullModule.forRoot` + `registerQueue` no `TestingModule`, no mesmo padrão já usado em `videos.module.spec.ts` — nunca mockando a fila, seguindo a convenção do projeto de não mockar libs configuradas.
+  - e2e cobre os 4 cenários do spec (`videos-complete-upload.plan.md`) mais 2 adicionais fora do spec original: `401` sem token e `400 INCOMPLETE_MULTIPART_UPLOAD` com partes incorretas — ambos códigos de erro do catálogo que não tinham cenário dedicado no spec gerado.
 
 ### SI-03.8 — Endpoints de Leitura e Entrega (GET /videos/:id, /stream, /download)
 - **Status:** pending

@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
+import { BullModule, getQueueToken } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { DataSource, Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { Channel } from '../channels/entities/channel.entity';
@@ -13,10 +15,21 @@ import {
 } from '../test/create-test-data-source';
 import storageConfig from '../config/storage.config';
 import { StorageService } from '../storage/storage.service';
-import { Video } from './entities/video.entity';
+import { Video, VideoStatus } from './entities/video.entity';
 import { VideoProcessingEvent } from './entities/video-processing-event.entity';
 import { VideosService } from './videos.service';
-import { ChannelNotFoundException } from './exceptions/video.exceptions';
+import {
+  ChannelNotFoundException,
+  ForbiddenNotOwnerException,
+  IncompleteMultipartUploadException,
+  UploadAlreadyCompletedException,
+  VideoNotFoundException,
+} from './exceptions/video.exceptions';
+import {
+  VIDEO_PROCESSING_QUEUE,
+  VIDEO_PROCESS_JOB_NAME,
+} from './videos.constants';
+import type { VideoProcessJobData } from './video-processing.consumer';
 
 const ALL_ENTITIES = [
   User,
@@ -34,7 +47,9 @@ describe('VideosService (integration)', () => {
   let videoRepository: Repository<Video>;
   let channelsService: ChannelsService;
   let storageService: StorageService;
+  let queue: Queue<VideoProcessJobData>;
   let videosService: VideosService;
+  let module: TestingModule;
 
   beforeAll(async () => {
     dataSource = createTestDataSource(ALL_ENTITIES);
@@ -44,27 +59,38 @@ describe('VideosService (integration)', () => {
     videoRepository = dataSource.getRepository(Video);
     channelsService = new ChannelsService(dataSource, channelRepository);
 
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, load: [storageConfig] }),
+        BullModule.forRoot({
+          connection: {
+            host: process.env.QUEUE_REDIS_HOST || 'redis',
+            port: Number(process.env.QUEUE_REDIS_PORT || 6379),
+          },
+        }),
+        BullModule.registerQueue({ name: VIDEO_PROCESSING_QUEUE }),
       ],
       providers: [StorageService],
     }).compile();
     storageService = module.get(StorageService);
+    queue = module.get(getQueueToken(VIDEO_PROCESSING_QUEUE));
 
     videosService = new VideosService(
       videoRepository,
       channelsService,
       storageService,
+      queue,
     );
   });
 
   afterAll(async () => {
+    await module.close();
     await dataSource.destroy();
   });
 
   beforeEach(async () => {
     await cleanAllTables(dataSource);
+    await queue.drain(true);
   });
 
   let counter = 0;
@@ -84,6 +110,25 @@ describe('VideosService (integration)', () => {
       `videos_svc_${n}@example.com`,
     );
     return { userId: user.id, channelId: channel.id };
+  }
+
+  async function createDraftWithUploadedPart(): Promise<{
+    userId: string;
+    channelId: string;
+    videoId: string;
+    eTag: string;
+  }> {
+    const { userId, channelId } = await createUserAndChannel();
+    const initiated = await videosService.initiateUpload(userId, {
+      originalFilename: 'integration-complete.mp4',
+      fileSizeBytes: 1024,
+    });
+    const putResponse = await fetch(initiated.parts[0].url, {
+      method: 'PUT',
+      body: Buffer.from('integration test content'),
+    });
+    const eTag = putResponse.headers.get('etag')!;
+    return { userId, channelId, videoId: initiated.id, eTag };
   }
 
   it('persists a draft Video with a real multipart upload against MinIO', async () => {
@@ -132,5 +177,72 @@ describe('VideosService (integration)', () => {
 
     const count = await videoRepository.count();
     expect(count).toBe(0);
+  });
+
+  describe('completeUpload', () => {
+    it('completes a real multipart upload, marks the video processing, and enqueues exactly one job', async () => {
+      const { userId, videoId, eTag } = await createDraftWithUploadedPart();
+
+      await videosService.completeUpload(userId, videoId, {
+        parts: [{ partNumber: 1, eTag }],
+      });
+
+      const persisted = await videoRepository.findOneBy({ id: videoId });
+      expect(persisted?.status).toBe(VideoStatus.PROCESSING);
+
+      const waitingJobs = await queue.getJobs(['waiting', 'completed']);
+      const matching = waitingJobs.filter(
+        (job) =>
+          job.name === VIDEO_PROCESS_JOB_NAME && job.data.videoId === videoId,
+      );
+      expect(matching).toHaveLength(1);
+    });
+
+    it('throws VideoNotFoundException for a nonexistent video', async () => {
+      const { userId } = await createUserAndChannel();
+
+      await expect(
+        videosService.completeUpload(userId, randomUUID(), {
+          parts: [{ partNumber: 1, eTag: '"irrelevant"' }],
+        }),
+      ).rejects.toThrow(VideoNotFoundException);
+    });
+
+    it('throws ForbiddenNotOwnerException when called by a different channel owner', async () => {
+      const { videoId, eTag } = await createDraftWithUploadedPart();
+      const { userId: otherUserId } = await createUserAndChannel();
+
+      await expect(
+        videosService.completeUpload(otherUserId, videoId, {
+          parts: [{ partNumber: 1, eTag }],
+        }),
+      ).rejects.toThrow(ForbiddenNotOwnerException);
+    });
+
+    it('throws UploadAlreadyCompletedException when completed twice', async () => {
+      const { userId, videoId, eTag } = await createDraftWithUploadedPart();
+      await videosService.completeUpload(userId, videoId, {
+        parts: [{ partNumber: 1, eTag }],
+      });
+
+      await expect(
+        videosService.completeUpload(userId, videoId, {
+          parts: [{ partNumber: 1, eTag }],
+        }),
+      ).rejects.toThrow(UploadAlreadyCompletedException);
+    });
+
+    it('throws IncompleteMultipartUploadException and leaves the video in draft when parts do not match', async () => {
+      const { userId, videoId } = await createDraftWithUploadedPart();
+
+      await expect(
+        videosService.completeUpload(userId, videoId, {
+          parts: [{ partNumber: 1, eTag: '"not-the-real-etag"' }],
+        }),
+      ).rejects.toThrow(IncompleteMultipartUploadException);
+
+      const persisted = await videoRepository.findOneBy({ id: videoId });
+      expect(persisted?.status).toBe(VideoStatus.DRAFT);
+    });
   });
 });
