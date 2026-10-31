@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 7/9 completed
+**SIs:** 8/9 completed
 
 ### SI-03.1 — Infra: MinIO, Redis, Worker Container e Config Namespaces
 - **Status:** completed
@@ -65,9 +65,14 @@
   - e2e cobre os 4 cenários do spec (`videos-complete-upload.plan.md`) mais 2 adicionais fora do spec original: `401` sem token e `400 INCOMPLETE_MULTIPART_UPLOAD` com partes incorretas — ambos códigos de erro do catálogo que não tinham cenário dedicado no spec gerado.
 
 ### SI-03.8 — Endpoints de Leitura e Entrega (GET /videos/:id, /stream, /download)
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 28 passing (8 unit em `VideosService.getVideoDetail`/`getDeliveryUrl`; 8 e2e em `videos-delivery`)
+- **Observations:**
+  - A API Contract pede campos camelCase (`channelId`, `durationSeconds`, `errorReason`, `createdAt`) mas a entidade `Video` usa snake_case. Como o projeto não tem nenhum `ClassSerializerInterceptor`/response DTO formal ainda, `getVideoDetail` monta um objeto plano camelCase manualmente no service (mesmo padrão já usado em `InitiateUploadResult` da SI-03.6), em vez de retornar a entidade direto.
+  - `GET /videos/:id`, `/stream` e `/download` são `@Public()` (leitura anônima, per Authorization Matrix da fase) — primeira vez no módulo de vídeos que um endpoint não exige token.
+  - Redirect implementado com `@Redirect()` do NestJS + retorno de `HttpRedirectResponse` (`{url, statusCode}`) dinâmico no handler, confirmado via consulta à documentação oficial (context7) antes de implementar, por ser o primeiro uso desse decorator no projeto.
+  - `VideosService.getDeliveryUrl(videoId, disposition)` é compartilhado entre `/stream` (`inline`) e `/download` (`attachment`) — valida existência (404) e status `ready` (409 `VIDEO_NOT_READY`) antes de chamar `StorageService.getPresignedGetUrl`.
+  - e2e cobre os 5 cenários do spec (`videos-delivery.plan.md`) mais 3 adicionais fora do spec original: `:id` malformado em `/videos/:id` (400), vídeo não-`ready` em `/download` (409) e vídeo inexistente em `/stream` (404) — espelhando a cobertura simétrica já dada a `/stream`/`/download` individualmente no spec original.
 
 ### SI-03.9 — Video Worker: Extração de Metadados e Geração de Thumbnail
 - **Status:** pending

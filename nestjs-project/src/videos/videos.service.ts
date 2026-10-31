@@ -16,6 +16,7 @@ import {
   IncompleteMultipartUploadException,
   UploadAlreadyCompletedException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from './exceptions/video.exceptions';
 import {
   VIDEO_PROCESSING_QUEUE,
@@ -31,6 +32,18 @@ export interface InitiateUploadResult {
   parts: { partNumber: number; url: string }[];
   partSizeBytes: number;
 }
+
+export interface VideoDetailResult {
+  id: string;
+  channelId: string;
+  title: string | null;
+  status: VideoStatus;
+  durationSeconds: number | null;
+  errorReason: string | null;
+  createdAt: Date;
+}
+
+export type DeliveryDisposition = 'inline' | 'attachment';
 
 @Injectable()
 export class VideosService {
@@ -150,5 +163,45 @@ export class VideosService {
     await this.videoRepository.update(videoId, {
       status: VideoStatus.PROCESSING,
     });
+  }
+
+  async getVideoDetail(videoId: string): Promise<VideoDetailResult> {
+    const video = await this.videoRepository.findOneBy({ id: videoId });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+
+    return {
+      id: video.id,
+      channelId: video.channel_id,
+      title: video.title,
+      status: video.status,
+      durationSeconds: video.duration_seconds,
+      errorReason: video.error_reason,
+      createdAt: video.created_at,
+    };
+  }
+
+  async getDeliveryUrl(
+    videoId: string,
+    disposition: DeliveryDisposition,
+  ): Promise<string> {
+    const video = await this.videoRepository.findOneBy({ id: videoId });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+    if (video.status !== VideoStatus.READY) {
+      throw new VideoNotReadyException();
+    }
+
+    return this.storageService.getPresignedGetUrl(
+      this.storageService.videosBucket,
+      video.storage_key,
+      {
+        disposition,
+        filename:
+          disposition === 'attachment' ? video.original_filename : undefined,
+      },
+    );
   }
 }

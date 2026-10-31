@@ -6,6 +6,7 @@ import {
   IncompleteMultipartUploadException,
   UploadAlreadyCompletedException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from './exceptions/video.exceptions';
 import { Video, VideoStatus } from './entities/video.entity';
 import { VIDEO_PROCESS_JOB_NAME } from './videos.constants';
@@ -64,6 +65,7 @@ function makeStorageService(overrides: Record<string, jest.Mock> = {}): any {
       .mockResolvedValue([{ partNumber: 1, url: 'https://signed-url' }]),
     abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
     completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
+    getPresignedGetUrl: jest.fn().mockResolvedValue('https://signed-get-url'),
     ...overrides,
   };
 }
@@ -390,6 +392,142 @@ describe('VideosService', () => {
 
       expect(repository.update).not.toHaveBeenCalled();
       expect(queue.add).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getVideoDetail', () => {
+    it('returns the public fields mapped to camelCase', async () => {
+      const video = makeVideo({
+        title: 'My video',
+        status: VideoStatus.READY,
+        duration_seconds: 42,
+        error_reason: null,
+      });
+      const repository = makeRepository({
+        findOneBy: jest.fn().mockResolvedValue(video),
+      });
+      const service = new VideosService(
+        repository,
+        makeChannelsService(),
+        makeStorageService(),
+        makeQueue(),
+      );
+
+      const result = await service.getVideoDetail('video-id');
+
+      expect(result).toEqual({
+        id: video.id,
+        channelId: video.channel_id,
+        title: 'My video',
+        status: VideoStatus.READY,
+        durationSeconds: 42,
+        errorReason: null,
+        createdAt: video.created_at,
+      });
+    });
+
+    it('throws VideoNotFoundException when the video does not exist', async () => {
+      const repository = makeRepository({
+        findOneBy: jest.fn().mockResolvedValue(null),
+      });
+      const service = new VideosService(
+        repository,
+        makeChannelsService(),
+        makeStorageService(),
+        makeQueue(),
+      );
+
+      await expect(service.getVideoDetail('missing-id')).rejects.toThrow(
+        VideoNotFoundException,
+      );
+    });
+  });
+
+  describe('getDeliveryUrl', () => {
+    it('requests an inline presigned URL for a ready video', async () => {
+      const repository = makeRepository({
+        findOneBy: jest
+          .fn()
+          .mockResolvedValue(makeVideo({ status: VideoStatus.READY })),
+      });
+      const storageService = makeStorageService();
+      const service = new VideosService(
+        repository,
+        makeChannelsService(),
+        storageService,
+        makeQueue(),
+      );
+
+      const url = await service.getDeliveryUrl('video-id', 'inline');
+
+      expect(url).toBe('https://signed-get-url');
+      expect(storageService.getPresignedGetUrl).toHaveBeenCalledWith(
+        'videos',
+        'video-id',
+        { disposition: 'inline', filename: undefined },
+      );
+    });
+
+    it('requests an attachment presigned URL with the original filename for a ready video', async () => {
+      const repository = makeRepository({
+        findOneBy: jest.fn().mockResolvedValue(
+          makeVideo({
+            status: VideoStatus.READY,
+            original_filename: 'my-video.mp4',
+          }),
+        ),
+      });
+      const storageService = makeStorageService();
+      const service = new VideosService(
+        repository,
+        makeChannelsService(),
+        storageService,
+        makeQueue(),
+      );
+
+      await service.getDeliveryUrl('video-id', 'attachment');
+
+      expect(storageService.getPresignedGetUrl).toHaveBeenCalledWith(
+        'videos',
+        'video-id',
+        { disposition: 'attachment', filename: 'my-video.mp4' },
+      );
+    });
+
+    it('throws VideoNotFoundException when the video does not exist', async () => {
+      const repository = makeRepository({
+        findOneBy: jest.fn().mockResolvedValue(null),
+      });
+      const service = new VideosService(
+        repository,
+        makeChannelsService(),
+        makeStorageService(),
+        makeQueue(),
+      );
+
+      await expect(
+        service.getDeliveryUrl('missing-id', 'inline'),
+      ).rejects.toThrow(VideoNotFoundException);
+    });
+
+    it('throws VideoNotReadyException when the video is not ready', async () => {
+      const repository = makeRepository({
+        findOneBy: jest
+          .fn()
+          .mockResolvedValue(makeVideo({ status: VideoStatus.PROCESSING })),
+      });
+      const storageService = makeStorageService();
+      const service = new VideosService(
+        repository,
+        makeChannelsService(),
+        storageService,
+        makeQueue(),
+      );
+
+      await expect(
+        service.getDeliveryUrl('video-id', 'inline'),
+      ).rejects.toThrow(VideoNotReadyException);
+      expect(storageService.getPresignedGetUrl).not.toHaveBeenCalled();
     });
   });
 });

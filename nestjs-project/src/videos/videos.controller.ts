@@ -1,11 +1,14 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
+  HttpRedirectResponse,
   Param,
   ParseUUIDPipe,
   Post,
+  Redirect,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -18,9 +21,14 @@ import {
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
 import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { CreateVideoDto } from './dto/create-video.dto';
 import { CompleteVideoUploadDto } from './dto/complete-video-upload.dto';
-import { VideosService, InitiateUploadResult } from './videos.service';
+import {
+  VideosService,
+  InitiateUploadResult,
+  VideoDetailResult,
+} from './videos.service';
 
 @ApiTags('videos')
 @Controller('videos')
@@ -119,5 +127,104 @@ export class VideosController {
     @Body() dto: CompleteVideoUploadDto,
   ): Promise<void> {
     return this.videosService.completeUpload(user.sub, id, dto);
+  }
+
+  @Public()
+  @Get(':id')
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOperation({
+    summary: 'Get video details',
+    description:
+      'Returns the public fields of a video. No authentication required.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Video details',
+    schema: {
+      properties: {
+        id: { type: 'string', format: 'uuid' },
+        channelId: { type: 'string', format: 'uuid' },
+        title: { type: 'string', nullable: true },
+        status: {
+          type: 'string',
+          enum: ['draft', 'processing', 'ready', 'error'],
+        },
+        durationSeconds: { type: 'number', nullable: true },
+        errorReason: { type: 'string', nullable: true },
+        createdAt: { type: 'string', format: 'date-time' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async getVideoDetail(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<VideoDetailResult> {
+    return this.videosService.getVideoDetail(id);
+  }
+
+  @Public()
+  @Get(':id/stream')
+  @Redirect()
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOperation({
+    summary: 'Stream a ready video',
+    description:
+      'Redirects to a short-lived presigned URL for inline playback. ' +
+      'Requires the video to be in "ready" status.',
+  })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to a presigned inline URL',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video is not ready for delivery yet',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async streamVideo(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<HttpRedirectResponse> {
+    const url = await this.videosService.getDeliveryUrl(id, 'inline');
+    return { url, statusCode: HttpStatus.FOUND };
+  }
+
+  @Public()
+  @Get(':id/download')
+  @Redirect()
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOperation({
+    summary: 'Download a ready video',
+    description:
+      'Redirects to a short-lived presigned URL with an attachment ' +
+      'disposition. Requires the video to be in "ready" status.',
+  })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to a presigned attachment URL',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video is not ready for delivery yet',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async downloadVideo(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<HttpRedirectResponse> {
+    const url = await this.videosService.getDeliveryUrl(id, 'attachment');
+    return { url, statusCode: HttpStatus.FOUND };
   }
 }
