@@ -156,6 +156,11 @@ export class VideosController {
     },
   })
   @ApiResponse({
+    status: 400,
+    description: 'Malformed video id',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
     status: 404,
     description: 'Video not found',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
@@ -179,6 +184,11 @@ export class VideosController {
   @ApiResponse({
     status: 302,
     description: 'Redirect to a presigned inline URL',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Malformed video id',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   @ApiResponse({
     status: 404,
@@ -210,6 +220,11 @@ export class VideosController {
   @ApiResponse({
     status: 302,
     description: 'Redirect to a presigned attachment URL',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Malformed video id',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   @ApiResponse({
     status: 404,

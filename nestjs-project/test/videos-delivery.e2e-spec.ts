@@ -204,5 +204,30 @@ describe('videos-delivery', () => {
       expect(response.status).toBe(404);
       expect(response.body.error).toBe('VIDEO_NOT_FOUND');
     });
+
+    it('nonexistent-video-download-returns-video-not-found', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/videos/00000000-0000-0000-0000-000000000000/download')
+        .redirects(0);
+
+      expect(response.status).toBe(404);
+      expect(response.body.error).toBe('VIDEO_NOT_FOUND');
+    });
+
+    it('malformed-video-id-returns-bad-request-on-stream', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/videos/not-a-uuid/stream')
+        .redirects(0);
+
+      expect(response.status).toBe(400);
+    });
+
+    it('malformed-video-id-returns-bad-request-on-download', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/videos/not-a-uuid/download')
+        .redirects(0);
+
+      expect(response.status).toBe(400);
+    });
   });
 });

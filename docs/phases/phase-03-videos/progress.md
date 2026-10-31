@@ -66,9 +66,10 @@
 
 ### SI-03.8 — Endpoints de Leitura e Entrega (GET /videos/:id, /stream, /download)
 - **Status:** completed
-- **Tests:** 28 passing (8 unit em `VideosService.getVideoDetail`/`getDeliveryUrl`; 8 e2e em `videos-delivery`)
+- **Tests:** 31 passing (8 unit em `VideosService.getVideoDetail`/`getDeliveryUrl`; 11 e2e em `videos-delivery`)
 - **Observations:**
   - A API Contract pede campos camelCase (`channelId`, `durationSeconds`, `errorReason`, `createdAt`) mas a entidade `Video` usa snake_case. Como o projeto não tem nenhum `ClassSerializerInterceptor`/response DTO formal ainda, `getVideoDetail` monta um objeto plano camelCase manualmente no service (mesmo padrão já usado em `InitiateUploadResult` da SI-03.6), em vez de retornar a entidade direto.
+  - Revisão pós-SI apontou 3 lacunas, todas fechadas: (1) as 3 rotas novas não documentavam `@ApiResponse(400)` pro `ParseUUIDPipe` no Swagger, apesar de aplicarem o pipe — adicionado nas 3; (2) faltava cenário e2e de `VIDEO_NOT_FOUND` em `GET /videos/:id/download` (já existia pra `/videos/:id` e `/stream`) — adicionado; (3) faltava cobertura e2e de `:id` malformado em `/stream` e `/download` (só existia pra `GET /videos/:id`) — adicionada pros 2.
   - `GET /videos/:id`, `/stream` e `/download` são `@Public()` (leitura anônima, per Authorization Matrix da fase) — primeira vez no módulo de vídeos que um endpoint não exige token.
   - Redirect implementado com `@Redirect()` do NestJS + retorno de `HttpRedirectResponse` (`{url, statusCode}`) dinâmico no handler, confirmado via consulta à documentação oficial (context7) antes de implementar, por ser o primeiro uso desse decorator no projeto.
   - `VideosService.getDeliveryUrl(videoId, disposition)` é compartilhado entre `/stream` (`inline`) e `/download` (`attachment`) — valida existência (404) e status `ready` (409 `VIDEO_NOT_READY`) antes de chamar `StorageService.getPresignedGetUrl`.
