@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import {
@@ -198,5 +201,41 @@ describe('StorageService (integration)', () => {
     const downloadResponse = await fetch(getUrl);
     expect(downloadResponse.status).toBe(200);
     expect(await downloadResponse.text()).toBe(content.toString());
+  });
+
+  describe('uploadObject / downloadObject', () => {
+    let tempDir: string;
+
+    beforeAll(async () => {
+      tempDir = await mkdtemp(join(tmpdir(), 'storage-service-'));
+    });
+
+    afterAll(async () => {
+      await rm(tempDir, { recursive: true, force: true });
+    });
+
+    it('round-trips a file through a real single-shot PUT/GET against MinIO', async () => {
+      const key = trackKey(`test-object-upload-${Date.now()}`);
+      const bucket = service.videosBucket;
+      const sourcePath = join(tempDir, 'source.txt');
+      const destPath = join(tempDir, 'downloaded.txt');
+      const content = 'content written via uploadObject/downloadObject';
+      await writeFile(sourcePath, content);
+
+      await service.uploadObject(bucket, key, sourcePath, 'text/plain');
+      await service.downloadObject(bucket, key, destPath);
+
+      const downloaded = await readFile(destPath, 'utf-8');
+      expect(downloaded).toBe(content);
+    });
+
+    it('downloadObject rejects when the key does not exist', async () => {
+      const bucket = service.videosBucket;
+      const destPath = join(tempDir, 'never-written.txt');
+
+      await expect(
+        service.downloadObject(bucket, 'does-not-exist', destPath),
+      ).rejects.toThrow();
+    });
   });
 });

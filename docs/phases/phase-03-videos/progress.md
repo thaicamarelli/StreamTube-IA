@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 8/9 completed
+**SIs:** 9/9 completed
 
 ### SI-03.1 — Infra: MinIO, Redis, Worker Container e Config Namespaces
 - **Status:** completed
@@ -76,6 +76,13 @@
   - e2e cobre os 5 cenários do spec (`videos-delivery.plan.md`) mais 3 adicionais fora do spec original: `:id` malformado em `/videos/:id` (400), vídeo não-`ready` em `/download` (409) e vídeo inexistente em `/stream` (404) — espelhando a cobertura simétrica já dada a `/stream`/`/download` individualmente no spec original.
 
 ### SI-03.9 — Video Worker: Extração de Metadados e Geração de Thumbnail
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 6 passing (2 integration em `VideoProcessingConsumer`, fila/MinIO/ffmpeg reais; 2 integration novos de round-trip em `StorageService.uploadObject`/`downloadObject`)
+- **Observations:**
+  - `ffprobe`/`ffmpeg` só estão instalados no container `video-worker` (`Dockerfile.worker`), não no `nestjs-api` (`Dockerfile.dev`) — por isso `video-processing.consumer.integration-spec.ts` precisa ser rodado via `docker compose exec video-worker npx jest ...`, não `nestjs-api` como o resto da suíte. Confirmado que falha com erro claro (`ENOENT ffprobe`) se rodado no container errado, e que `node_modules`/código-fonte são o mesmo bind mount nos dois containers.
+  - `StorageService` ganhou `downloadObject`/`uploadObject` (streaming via `pipeline`, não bufferiza em memória — vídeos podem ter até 10GB) pra dar ao worker acesso de leitura/escrita direta a objetos, complementando os métodos de upload multipart/presigned já existentes.
+  - A thumbnail usa o mesmo `video.id` como `thumbnail_key`, armazenado no bucket `thumbnails` (bucket diferente do `videos`, per TD-02 — não há colisão de key entre os dois).
+  - Lógica de tentativas: `job.attemptsMade` conta tentativas já *completadas* (0 na primeira chamada), então a tentativa atual é `job.attemptsMade + 1`; só a tentativa que esgota `job.opts.attempts` (3) seta `Video.status = "error"` — tentativas anteriores só registram o `VideoProcessingEvent(status: "error")` e deixam o BullMQ re-tentar via seu próprio backoff. Confirmado contra a documentação oficial do BullMQ (context7) antes de implementar, já que a semântica exata de `attemptsMade` é fácil de errar por off-by-one.
+  - Vídeo de teste real gerado on-the-fly via `ffmpeg -f lavfi -i color=...` (sem precisar commitar um fixture binário no repo); o cenário de falha usa um arquivo não-vídeo, fazendo o `ffprobe` real falhar e esgotar as 3 tentativas com o backoff exponencial real configurado (~3s de espera total).
+  - **Bug real de produção encontrado e corrigido**: `WorkerModule` registrava `Video`/`VideoProcessingEvent` via `TypeOrmModule.forFeature` mas nunca `Channel` (de quem `Video` depende via `@ManyToOne`) nem `User` (de quem `Channel` depende via `@OneToOne`) — o worker standalone real (não só o teste) quebraria ao tentar montar os metadados do TypeORM (`Entity metadata for Video#channel was not found`), nunca conseguindo processar um job de verdade. `autoLoadEntities: true` não resolve isso por si só — per `.claude/rules/nestjs-modules.md`, uma entidade só é descoberta se algum módulo a registra via `forFeature`. Corrigido adicionando `Channel` e `User` ao `forFeature` do `WorkerModule`.
+  - Esse mesmo bug também causava um processo Jest que nunca encerrava (loop de retry de conexão do TypeORM combinado com conexões não fechadas corretamente) — rodar `worker.module.spec.ts` chegou a ficar travado por horas antes de eu notar e investigar via `ps aux` dentro do container. Resolvido pelo mesmo fix.

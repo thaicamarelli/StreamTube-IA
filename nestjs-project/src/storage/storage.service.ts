@@ -1,3 +1,6 @@
+import { createReadStream, createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import type { Readable } from 'node:stream';
 import { Inject, Injectable } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import {
@@ -5,6 +8,7 @@ import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   GetObjectCommand,
+  PutObjectCommand,
   S3Client,
   UploadPartCommand,
 } from '@aws-sdk/client-s3';
@@ -141,6 +145,39 @@ export class StorageService {
         Bucket: bucket,
         Key: key,
         UploadId: uploadId,
+      }),
+    );
+  }
+
+  // Streams the object to a local file instead of buffering it in memory —
+  // source videos can be up to 10GB (per phase-03-videos/TD-03), and the
+  // worker's ffprobe/ffmpeg invocations need a real file path anyway.
+  async downloadObject(
+    bucket: string,
+    key: string,
+    destPath: string,
+  ): Promise<void> {
+    const result = await this.client.send(
+      new GetObjectCommand({ Bucket: bucket, Key: key }),
+    );
+    if (!result.Body) {
+      throw new Error(`Storage returned no body for ${bucket}/${key}`);
+    }
+    await pipeline(result.Body as Readable, createWriteStream(destPath));
+  }
+
+  async uploadObject(
+    bucket: string,
+    key: string,
+    filePath: string,
+    contentType: string,
+  ): Promise<void> {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: createReadStream(filePath),
+        ContentType: contentType,
       }),
     );
   }
