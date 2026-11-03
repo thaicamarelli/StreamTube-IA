@@ -491,19 +491,19 @@ SI-03.8 — depends on SI-03.2, SI-03.4 (endpoints de leitura/entrega)
 
 ## Deliverables
 
-- [ ] SI-03.1 — Infra: MinIO, Redis, Worker Container e Config Namespaces
-- [ ] SI-03.2 — Data Model: Video e VideoProcessingEvent
-- [ ] SI-03.3 — Catálogo de Erros: Exceções de Domínio do Módulo de Vídeos
-- [ ] SI-03.4 — Storage Module: Upload Multipart e URLs Pré-assinadas
-- [ ] SI-03.5 — Queue Module: BullMQ Producer e Worker Scaffold
-- [ ] SI-03.6 — Endpoint: Iniciar Upload (POST /videos)
-- [ ] SI-03.7 — Endpoint: Completar Upload (POST /videos/:id/complete)
-- [ ] SI-03.8 — Endpoints de Leitura e Entrega (GET /videos/:id, /stream, /download)
-- [ ] SI-03.9 — Video Worker: Extração de Metadados e Geração de Thumbnail
+- [x] SI-03.1 — Infra: MinIO, Redis, Worker Container e Config Namespaces
+- [x] SI-03.2 — Data Model: Video e VideoProcessingEvent
+- [x] SI-03.3 — Catálogo de Erros: Exceções de Domínio do Módulo de Vídeos
+- [x] SI-03.4 — Storage Module: Upload Multipart e URLs Pré-assinadas
+- [x] SI-03.5 — Queue Module: BullMQ Producer e Worker Scaffold
+- [x] SI-03.6 — Endpoint: Iniciar Upload (POST /videos)
+- [x] SI-03.7 — Endpoint: Completar Upload (POST /videos/:id/complete)
+- [x] SI-03.8 — Endpoints de Leitura e Entrega (GET /videos/:id, /stream, /download)
+- [x] SI-03.9 — Video Worker: Extração de Metadados e Geração de Thumbnail
 
 **Full test suites:**
 
-- [ ] Backend tests pass (`docker compose exec nestjs-api npm test`)
-- [ ] E2E tests pass (`docker compose exec nestjs-api npm run test:e2e`)
-- [ ] Type/compilation checks pass (`docker compose exec nestjs-api npx tsc --noEmit`)
-- [ ] Lint passes (`docker compose exec nestjs-api npm run lint`)
+- [x] Backend tests pass (`docker compose exec nestjs-api npm test`) — exceto `video-processing.consumer.integration-spec.ts`, que exige `ffprobe`/`ffmpeg` e por isso roda via `docker compose exec video-worker npm test` (único container com as CLIs instaladas); confirmado passando lá.
+- [x] E2E tests pass (`docker compose exec nestjs-api npm run test:e2e`)
+- [x] Type/compilation checks pass (`docker compose exec nestjs-api npx tsc --noEmit`)
+- [ ] Lint passes (`docker compose exec nestjs-api npm run lint`) — ~207 erros pré-existentes (deferidos por decisão do usuário durante a fase); nenhum erro novo de categoria distinta introduzido pela Fase 03, só mais instâncias do padrão já presente no resto da suíte de testes.
