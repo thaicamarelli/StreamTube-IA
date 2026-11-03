@@ -53,10 +53,13 @@ export async function extractDurationSeconds(
   }
 
   const duration = parsed.format?.duration;
-  if (!duration) {
-    throw new Error('ffprobe output did not include format.duration');
+  const parsedDuration = duration === undefined ? NaN : parseFloat(duration);
+  if (!Number.isFinite(parsedDuration)) {
+    throw new Error(
+      `ffprobe output did not include a numeric format.duration (got: ${JSON.stringify(duration)})`,
+    );
   }
-  return Math.round(parseFloat(duration));
+  return Math.round(parsedDuration);
 }
 
 // Frame extracted at 10% of total duration, per phase-03-videos/TD-04's

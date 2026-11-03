@@ -91,9 +91,14 @@ export class VideoProcessingConsumer extends WorkerHost {
       // earlier failures just leave it in "processing" so BullMQ's own
       // backoff can retry naturally.
       if (attempt >= maxAttempts) {
+        // error_reason is public (served unauthenticated via GET
+        // /videos/:id, per SI-03.8) — the raw message can contain ffmpeg's
+        // stderr and the worker's internal temp file paths, so only a
+        // generic reason goes here. The detailed message stays on the
+        // VideoProcessingEvent row above, which is not exposed by any API.
         await this.videoRepository.update(video.id, {
           status: VideoStatus.ERROR,
-          error_reason: message,
+          error_reason: 'Video processing failed',
         });
       }
 

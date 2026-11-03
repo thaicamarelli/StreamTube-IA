@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -28,6 +28,7 @@ import {
 } from './entities/video-processing-event.entity';
 import { VideoProcessingConsumer } from './video-processing.consumer';
 import {
+  VIDEO_PROCESSING_JOB_OPTIONS,
   VIDEO_PROCESSING_QUEUE,
   VIDEO_PROCESS_JOB_NAME,
 } from './videos.constants';
@@ -43,6 +44,37 @@ const ALL_ENTITIES = [
   Video,
   VideoProcessingEvent,
 ];
+
+// Decodes the single pixel of a 1x1-scaled image to raw RGB bytes, so the
+// thumbnail test can assert which color segment of the fixture video the
+// extracted frame actually came from — not just that *some* thumbnail exists.
+function averageColor(imagePath: string): Promise<[number, number, number]> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('ffmpeg', [
+      '-i',
+      imagePath,
+      '-vf',
+      'scale=1:1',
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'rgb24',
+      '-y',
+      '-',
+    ]);
+    const chunks: Buffer[] = [];
+    child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`ffmpeg scale exited with code ${code}`));
+        return;
+      }
+      const buf = Buffer.concat(chunks);
+      resolve([buf[0], buf[1], buf[2]]);
+    });
+  });
+}
 
 async function waitUntil(
   predicate: () => Promise<boolean>,
@@ -75,12 +107,21 @@ describe('VideoProcessingConsumer (integration)', () => {
     fixturesDir = await mkdtemp(join(tmpdir(), 'consumer-fixtures-'));
     realVideoPath = join(fixturesDir, 'real.mp4');
     // A tiny real, valid MP4 generated on the fly via ffmpeg's lavfi source
-    // — avoids committing a binary fixture to the repo.
+    // — avoids committing a binary fixture to the repo. Two color segments
+    // (red 0-2s, blue 2-10s) let the thumbnail test assert the extracted
+    // frame actually comes from the 10%-of-duration mark (per
+    // phase-03-videos/TD-04), not just that *some* thumbnail was produced.
     await execFileAsync('ffmpeg', [
       '-f',
       'lavfi',
       '-i',
-      'color=c=blue:s=64x64:d=2:r=5',
+      'color=c=red:s=64x64:d=2:r=5',
+      '-f',
+      'lavfi',
+      '-i',
+      'color=c=blue:s=64x64:d=8:r=5',
+      '-filter_complex',
+      '[0:v][1:v]concat=n=2:v=1:a=0',
       '-pix_fmt',
       'yuv420p',
       '-y',
@@ -107,10 +148,7 @@ describe('VideoProcessingConsumer (integration)', () => {
         }),
         BullModule.registerQueue({
           name: VIDEO_PROCESSING_QUEUE,
-          defaultJobOptions: {
-            attempts: 3,
-            backoff: { type: 'exponential', delay: 1000 },
-          },
+          defaultJobOptions: VIDEO_PROCESSING_JOB_OPTIONS,
         }),
       ],
       providers: [VideoProcessingConsumer, StorageService],
@@ -204,7 +242,7 @@ describe('VideoProcessingConsumer (integration)', () => {
 
     const persisted = await videoRepository.findOneBy({ id: video.id });
     expect(persisted?.status).toBe(VideoStatus.READY);
-    expect(persisted?.duration_seconds).toBe(2);
+    expect(persisted?.duration_seconds).toBe(10);
     expect(persisted?.thumbnail_key).toBe(video.id);
 
     const events = await eventRepository.find({
@@ -222,6 +260,13 @@ describe('VideoProcessingConsumer (integration)', () => {
     );
     const { size } = await stat(thumbnailDest);
     expect(size).toBeGreaterThan(0);
+
+    // 10% of a 10s video is the 1s mark, which falls inside the red
+    // segment (0-2s) — a thumbnail taken at the wrong frame (e.g. seek 0,
+    // or the end of the file) would come back blue instead.
+    const [r, , b] = await averageColor(thumbnailDest);
+    expect(r).toBeGreaterThan(150);
+    expect(b).toBeLessThan(100);
   }, 30000);
 
   it('exhausts retries on a corrupted file and ends in error with one event per attempt', async () => {
@@ -237,6 +282,11 @@ describe('VideoProcessingConsumer (integration)', () => {
     const persisted = await videoRepository.findOneBy({ id: video.id });
     expect(persisted?.status).toBe(VideoStatus.ERROR);
     expect(persisted?.error_reason).toBeTruthy();
+    // error_reason is public (served unauthenticated via GET /videos/:id,
+    // per SI-03.8) — it must never contain ffmpeg's raw stderr or the
+    // worker's internal temp file paths. The detailed message belongs only
+    // on VideoProcessingEvent, which no API exposes.
+    expect(persisted?.error_reason).not.toMatch(/ffprobe|tmp|\//);
 
     const events = await eventRepository.find({
       where: { video_id: video.id },
