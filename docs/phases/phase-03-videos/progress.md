@@ -5,6 +5,19 @@
 
 **Post-phase cleanup:** dívida de lint pré-existente resolvida (262 → 0 erros) via override no `eslint.config.mjs` para arquivos de teste + 4 correções pontuais (3 `no-unused-vars` reais, 1 `any` em código de produção de Fase 02 em `channels.service.ts`). Ver commit "Resolve a divida de lint pre-existente (262 -> 0 erros)". Suite completa e e2e revalidados 100% verdes após a mudança.
 
+**Ultrareview da fase completa (`/code-review` sobre `dev...feature/phase-03-videos`):** rodado após as 9 SIs e seus ciclos de revisão individuais, pra pegar o que uma revisão por-SI não enxerga (interações entre SIs, código de produção não tocado diretamente). 10 achados; 7 corrigidos:
+- `video-worker` não tinha nenhum jeito documentado/scriptado de ser realmente iniciado (container só roda `tail -f /dev/null`, igual `nestjs-api`) — adicionados `start:worker`/`start:worker:dev` ao `package.json` e documentação no `CLAUDE.md`.
+- Race condition real em `completeUpload`: enfileirava o job antes de setar `status: processing`, deixando uma janela onde um worker rápido podia ter seu `ready` sobrescrito de volta. Invertida a ordem + compensação (reverte pra `draft`) se o enqueue falhar.
+- `completeMultipartUpload` mapeava QUALQUER erro pra `IncompleteMultipartUploadException` (400), incluindo falhas de infra (MinIO fora do ar, timeout) — agora só mapeia erros S3 que de fato significam "partes não correspondem" (`InvalidPart`/`InvalidPartOrder`/`NoSuchUpload`/`EntityTooSmall`); o resto propaga como está.
+- Risco de header injection: `buildAttachmentDisposition` não removia CR/LF do filename antes de montar o `Content-Disposition`. Agora remove todos os caracteres de controle.
+- Compensação de `abortMultipartUpload` em `initiateUpload` podia mascarar o erro original se o próprio abort falhasse — isolado num helper que loga e não relança.
+- `VideoProcessingEventStatus.PROCESSING` nunca era persistido (enum morto) — sem registro de auditoria se o worker morresse no meio de uma tentativa. Agora cada tentativa loga um evento `processing` antes do trabalho, além do `ready`/`error` de antes.
+- `migrations.integration-spec.ts` tinha perdido a cobertura de `CreateAuthTokens.down()` desde que `AddVideosChannelIdIndex` passou a ser a última migration (SI-03.2) — comentário também ficou desatualizado. Adicionado um segundo `undoLastMigration()` pra alcançar `CreateAuthTokens` de fato.
+
+3 achados avaliados e descartados (sem ação): `@typescript-eslint/unbound-method` desabilitado em testes é correto, não uma perda real — as 19 ocorrências eram todas o padrão seguro `expect(mockRepo.save).toHaveBeenCalledWith(...)` sobre objetos mock (não instâncias reais), o falso-positivo clássico e documentado dessa regra com Jest; a suposta mistura de rename+mudança funcional no mesmo commit de `channels.service.ts` é um artefato de comparar o diff squashed da branch — checado via `git log --follow`, são commits separados; o `Math.round` sem guard de limite inferior em `extractDurationSeconds` (seek=0 pra vídeos <0.5s) é um nitpick de baixo valor sem cenário de falha concreto (seek=0 é o mais seguro possível).
+
+Suite completa (34/35 via `nestjs-api` + 2/2 via `video-worker`) e e2e (6/6, 75/75) revalidados 100% verdes; `tsc --noEmit` e `npm run lint` (0 erros) limpos após as correções.
+
 ### SI-03.1 — Infra: MinIO, Redis, Worker Container e Config Namespaces
 - **Status:** completed
 - **Tests:** 9 passing
