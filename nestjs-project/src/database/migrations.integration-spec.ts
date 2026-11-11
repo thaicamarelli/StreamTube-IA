@@ -63,8 +63,10 @@ describe('Database migrations (integration)', () => {
   });
 
   afterAll(async () => {
-    // The second test undoes the last migration, leaving token tables missing.
-    // Re-apply so the shared DB is fully migrated when subsequent suites run.
+    // The last two tests undo all three non-base migrations in turn (the
+    // channel_id index, CreateVideos, then CreateAuthTokens), leaving the
+    // videos and token tables missing. Re-apply so the shared DB is fully
+    // migrated when subsequent suites run.
     await dataSource.runMigrations();
     await dataSource.destroy();
   });
@@ -98,6 +100,24 @@ describe('Database migrations (integration)', () => {
     const result = await dataSource.query<{ indexname: string }[]>(
       `SELECT indexname FROM pg_indexes
        WHERE tablename = 'videos' AND indexdef ILIKE '%channel_id%'`,
+    );
+    expect(result).toHaveLength(0);
+  });
+
+  it('should revert CreateAuthTokens and drop the token tables', async () => {
+    // Two more migrations sit between the already-undone index migration
+    // and CreateAuthTokens (CreateVideos, then CreateAuthTokens itself) —
+    // CreateAuthTokens used to be the last migration this suite covered
+    // before SI-03.2 added the videos migrations after it; without walking
+    // back both, CreateAuthTokens.down() would have no test coverage at all.
+    await dataSource.undoLastMigration(); // undoes CreateVideos
+    await dataSource.undoLastMigration(); // undoes CreateAuthTokens
+
+    const result = await dataSource.query<{ table_name: string }[]>(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'public'
+         AND table_name = ANY($1::text[])`,
+      [['refresh_tokens', 'verification_tokens']],
     );
     expect(result).toHaveLength(0);
   });

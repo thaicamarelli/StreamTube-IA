@@ -230,7 +230,7 @@ describe('VideoProcessingConsumer (integration)', () => {
     );
   }
 
-  it('processes a real video end-to-end: ready, duration, thumbnail, single event', async () => {
+  it('processes a real video end-to-end: ready, duration, thumbnail, processing+ready events', async () => {
     const video = await insertProcessingVideo('real');
 
     await queue.add(VIDEO_PROCESS_JOB_NAME, { videoId: video.id });
@@ -247,10 +247,13 @@ describe('VideoProcessingConsumer (integration)', () => {
 
     const events = await eventRepository.find({
       where: { video_id: video.id },
+      order: { created_at: 'ASC' },
     });
-    expect(events).toHaveLength(1);
-    expect(events[0].status).toBe(VideoProcessingEventStatus.READY);
+    expect(events).toHaveLength(2);
+    expect(events[0].status).toBe(VideoProcessingEventStatus.PROCESSING);
     expect(events[0].attempt).toBe(1);
+    expect(events[1].status).toBe(VideoProcessingEventStatus.READY);
+    expect(events[1].attempt).toBe(1);
 
     const thumbnailDest = join(fixturesDir, 'downloaded-thumbnail.jpg');
     await storageService.downloadObject(
@@ -269,7 +272,7 @@ describe('VideoProcessingConsumer (integration)', () => {
     expect(b).toBeLessThan(100);
   }, 30000);
 
-  it('exhausts retries on a corrupted file and ends in error with one event per attempt', async () => {
+  it('exhausts retries on a corrupted file and ends in error with a processing+error event per attempt', async () => {
     const video = await insertProcessingVideo('corrupted');
 
     await queue.add(VIDEO_PROCESS_JOB_NAME, { videoId: video.id });
@@ -290,12 +293,21 @@ describe('VideoProcessingConsumer (integration)', () => {
 
     const events = await eventRepository.find({
       where: { video_id: video.id },
-      order: { attempt: 'ASC' },
+      order: { created_at: 'ASC' },
     });
-    expect(events).toHaveLength(3);
-    expect(events.map((e) => e.attempt)).toEqual([1, 2, 3]);
-    for (const event of events) {
-      expect(event.status).toBe(VideoProcessingEventStatus.ERROR);
+    expect(events).toHaveLength(6);
+    expect(events.map((e) => e.attempt)).toEqual([1, 1, 2, 2, 3, 3]);
+    expect(events.map((e) => e.status)).toEqual([
+      VideoProcessingEventStatus.PROCESSING,
+      VideoProcessingEventStatus.ERROR,
+      VideoProcessingEventStatus.PROCESSING,
+      VideoProcessingEventStatus.ERROR,
+      VideoProcessingEventStatus.PROCESSING,
+      VideoProcessingEventStatus.ERROR,
+    ]);
+    for (const event of events.filter(
+      (e) => e.status === VideoProcessingEventStatus.ERROR,
+    )) {
       expect(event.message).toBeTruthy();
     }
   }, 40000);

@@ -42,6 +42,17 @@ export class VideoProcessingConsumer extends WorkerHost {
       throw new Error(`Video ${videoId} not found`);
     }
 
+    // Logged before any work starts so the audit trail has a record of this
+    // attempt even if the process crashes mid-attempt (e.g. OOM during
+    // ffmpeg) and never reaches the success/error event below.
+    await this.eventRepository.save(
+      this.eventRepository.create({
+        video_id: video.id,
+        status: VideoProcessingEventStatus.PROCESSING,
+        attempt,
+      }),
+    );
+
     const tempDir = await mkdtemp(join(tmpdir(), 'video-processing-'));
     const sourcePath = join(tempDir, 'source');
     const thumbnailPath = join(tempDir, 'thumbnail.jpg');
