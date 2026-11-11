@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -26,6 +26,24 @@ import type { VideoProcessJobData } from './video-processing.consumer';
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 * 1024; // 10GB, per phase-03-videos/TD-03
 
+// S3/MinIO error codes that specifically mean "the submitted parts list
+// doesn't match what storage expects" — the only case the Error Catalog's
+// 400 INCOMPLETE_MULTIPART_UPLOAD is meant to cover. Any other error
+// (network, auth, MinIO unavailable) must propagate as-is rather than being
+// masked as a client-input problem.
+const MULTIPART_MISMATCH_ERROR_NAMES = new Set([
+  'InvalidPart',
+  'InvalidPartOrder',
+  'NoSuchUpload',
+  'EntityTooSmall',
+]);
+
+function isMultipartMismatchError(error: unknown): boolean {
+  return (
+    error instanceof Error && MULTIPART_MISMATCH_ERROR_NAMES.has(error.name)
+  );
+}
+
 export interface InitiateUploadResult {
   id: string;
   uploadId: string;
@@ -47,6 +65,8 @@ export type DeliveryDisposition = 'inline' | 'attachment';
 
 @Injectable()
 export class VideosService {
+  private readonly logger = new Logger(VideosService.name);
+
   constructor(
     @InjectRepository(Video)
     private readonly videoRepository: Repository<Video>,
@@ -55,6 +75,25 @@ export class VideosService {
     @InjectQueue(VIDEO_PROCESSING_QUEUE)
     private readonly videoProcessingQueue: Queue<VideoProcessJobData>,
   ) {}
+
+  // Best-effort compensation: if the abort itself fails (e.g. storage also
+  // unreachable), that secondary failure must not replace the original error
+  // the caller is already propagating — log it and move on.
+  private async tryAbortMultipartUpload(
+    bucket: string,
+    key: string,
+    uploadId: string,
+  ): Promise<void> {
+    try {
+      await this.storageService.abortMultipartUpload(bucket, key, uploadId);
+    } catch (abortError) {
+      this.logger.warn(
+        `Failed to abort multipart upload ${uploadId} for ${bucket}/${key}: ${
+          abortError instanceof Error ? abortError.message : String(abortError)
+        }`,
+      );
+    }
+  }
 
   async initiateUpload(
     userId: string,
@@ -95,7 +134,7 @@ export class VideosService {
         partCount,
       );
     } catch (error) {
-      await this.storageService.abortMultipartUpload(bucket, videoId, uploadId);
+      await this.tryAbortMultipartUpload(bucket, videoId, uploadId);
       throw error;
     }
 
@@ -109,7 +148,7 @@ export class VideosService {
       });
       await this.videoRepository.save(video);
     } catch (error) {
-      await this.storageService.abortMultipartUpload(bucket, videoId, uploadId);
+      await this.tryAbortMultipartUpload(bucket, videoId, uploadId);
       throw error;
     }
 
@@ -149,20 +188,38 @@ export class VideosService {
         video.upload_id as string,
         dto.parts,
       );
-    } catch {
-      throw new IncompleteMultipartUploadException();
+    } catch (error) {
+      // Only a genuine parts mismatch is the client's fault (400). Anything
+      // else (MinIO unreachable, auth failure, timeout) is an infra problem
+      // and must not be masked as "your parts list is wrong" — propagate it
+      // as-is so it surfaces as a 500, not a misleading client error.
+      if (isMultipartMismatchError(error)) {
+        throw new IncompleteMultipartUploadException();
+      }
+      throw error;
     }
 
-    // Enqueued before the status update: BullMQ persists the job in Redis
-    // durably once add() resolves, so a failure here leaves the video in
-    // draft with nothing enqueued — a safe, visible state. Doing it in the
-    // opposite order would risk a video stuck in "processing" forever with
-    // no job tracking it, if the DB write succeeded but the enqueue failed.
-    await this.videoProcessingQueue.add(VIDEO_PROCESS_JOB_NAME, { videoId });
-
+    // Status is set to processing *before* enqueueing: the worker could, in
+    // principle, dequeue and finish the job (setting status: ready) faster
+    // than this method's own subsequent write — enqueueing first would let
+    // that write silently clobber the worker's "ready" back to "processing".
+    // Setting status first closes that window; if the enqueue itself then
+    // fails, the status is reverted back to draft so the video isn't left
+    // stuck in "processing" with nothing tracking it.
     await this.videoRepository.update(videoId, {
       status: VideoStatus.PROCESSING,
     });
+
+    try {
+      await this.videoProcessingQueue.add(VIDEO_PROCESS_JOB_NAME, {
+        videoId,
+      });
+    } catch (error) {
+      await this.videoRepository.update(videoId, {
+        status: VideoStatus.DRAFT,
+      });
+      throw error;
+    }
   }
 
   async getVideoDetail(videoId: string): Promise<VideoDetailResult> {

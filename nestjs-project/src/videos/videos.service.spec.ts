@@ -276,12 +276,15 @@ describe('VideosService', () => {
         videoId: 'video-id',
       });
 
-      const addOrder = queue.add.mock.invocationCallOrder[0];
+      // Status is set to processing before enqueueing — so a worker that
+      // dequeues and finishes the job immediately can never have its
+      // "ready" update clobbered by this method's own later write.
       const updateOrder = repository.update.mock.invocationCallOrder[0];
-      expect(addOrder).toBeLessThan(updateOrder);
+      const addOrder = queue.add.mock.invocationCallOrder[0];
+      expect(updateOrder).toBeLessThan(addOrder);
     });
 
-    it('leaves the video in draft and does not update status when enqueueing the job fails', async () => {
+    it('reverts the video back to draft when enqueueing the job fails after the status update', async () => {
       const repository = makeRepository();
       const storageService = makeStorageService();
       const queue = makeQueue({
@@ -298,7 +301,12 @@ describe('VideosService', () => {
         service.completeUpload('user-id', 'video-id', validDto),
       ).rejects.toThrow('redis unavailable');
 
-      expect(repository.update).not.toHaveBeenCalled();
+      expect(repository.update).toHaveBeenNthCalledWith(1, 'video-id', {
+        status: VideoStatus.PROCESSING,
+      });
+      expect(repository.update).toHaveBeenNthCalledWith(2, 'video-id', {
+        status: VideoStatus.DRAFT,
+      });
     });
 
     it('throws VideoNotFoundException when the video does not exist', async () => {
@@ -371,12 +379,14 @@ describe('VideosService', () => {
       ).rejects.toThrow(UploadAlreadyCompletedException);
     });
 
-    it('throws IncompleteMultipartUploadException and does not advance state when storage rejects the parts', async () => {
+    it('throws IncompleteMultipartUploadException and does not advance state when storage reports a parts mismatch', async () => {
       const repository = makeRepository();
+      const s3Error = new Error(
+        'One or more of the specified parts could not be found.',
+      );
+      s3Error.name = 'InvalidPart';
       const storageService = makeStorageService({
-        completeMultipartUpload: jest
-          .fn()
-          .mockRejectedValue(new Error('mismatched parts')),
+        completeMultipartUpload: jest.fn().mockRejectedValue(s3Error),
       });
       const queue = makeQueue();
       const service = new VideosService(
@@ -389,6 +399,29 @@ describe('VideosService', () => {
       await expect(
         service.completeUpload('user-id', 'video-id', validDto),
       ).rejects.toThrow(IncompleteMultipartUploadException);
+
+      expect(repository.update).not.toHaveBeenCalled();
+      expect(queue.add).not.toHaveBeenCalled();
+    });
+
+    it('propagates a generic storage error as-is (not as IncompleteMultipartUploadException) when it is not a parts-mismatch error', async () => {
+      const repository = makeRepository();
+      const storageService = makeStorageService({
+        completeMultipartUpload: jest
+          .fn()
+          .mockRejectedValue(new Error('connect ETIMEDOUT')),
+      });
+      const queue = makeQueue();
+      const service = new VideosService(
+        repository,
+        makeChannelsService(),
+        storageService,
+        queue,
+      );
+
+      await expect(
+        service.completeUpload('user-id', 'video-id', validDto),
+      ).rejects.toThrow('connect ETIMEDOUT');
 
       expect(repository.update).not.toHaveBeenCalled();
       expect(queue.add).not.toHaveBeenCalled();
