@@ -69,6 +69,26 @@ describe('StorageService', () => {
     );
   });
 
+  it('getPresignedGetUrl strips control characters (e.g. CRLF) from the filename to prevent header injection', async () => {
+    const malicious = 'video.mp4\r\nX-Injected: 1';
+    const url = await service.getPresignedGetUrl('videos', 'some-key', {
+      disposition: 'attachment',
+      filename: malicious,
+    });
+    const parsed = new URL(url);
+    const disposition = parsed.searchParams.get(
+      'response-content-disposition',
+    )!;
+
+    // The security property is "no literal CR/LF reaches the header value"
+    // — without a line break there is no way to start a new header, so the
+    // leftover text becomes a harmless (if odd) filename, not an injected
+    // header. Stripping the text itself isn't the point; stripping the
+    // line break is.
+    expect(disposition).not.toMatch(/[\r\n]/);
+    expect(disposition).toContain('filename="video.mp4X-Injected: 1"');
+  });
+
   it('getPresignedPartUrls signs part-upload URLs with a 24h TTL (longer than the GET TTL)', async () => {
     const [part] = await service.getPresignedPartUrls(
       'videos',

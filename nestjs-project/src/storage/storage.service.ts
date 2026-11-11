@@ -33,12 +33,16 @@ const GET_URL_TTL_SECONDS = 900; // 15 minutes, per phase-03-videos/TD-05
 const PART_UPLOAD_URL_TTL_SECONDS = 24 * 60 * 60; // 24 hours
 
 // Builds a Content-Disposition value per RFC 6266: a quoted-string fallback
-// with embedded quotes/backslashes stripped (for older clients) plus a
-// filename*=UTF-8'' extended form so non-ASCII titles (e.g. Portuguese
-// accents) survive for clients that support it.
+// with embedded quotes/backslashes/control-characters stripped (for older
+// clients — CR/LF in particular must never reach a literal header value, or
+// a client-controlled filename becomes an HTTP response header injection
+// vector) plus a filename*=UTF-8'' extended form so non-ASCII titles (e.g.
+// Portuguese accents) survive for clients that support it.
 function buildAttachmentDisposition(filename: string): string {
-  const asciiFallback = filename.replace(/["\\]/g, '');
-  const encoded = encodeURIComponent(filename);
+  // eslint-disable-next-line no-control-regex
+  const sanitized = filename.replace(/[\x00-\x1f\x7f]/g, '');
+  const asciiFallback = sanitized.replace(/["\\]/g, '');
+  const encoded = encodeURIComponent(sanitized);
   return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`;
 }
 
