@@ -7,7 +7,6 @@ import { App } from 'supertest/types';
 import { DataSource, Repository } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { AuthService } from '../src/auth/auth.service';
-import { Channel } from '../src/channels/entities/channel.entity';
 import { Video } from '../src/videos/entities/video.entity';
 import {
   VIDEO_PROCESSING_QUEUE,
@@ -21,7 +20,6 @@ import { cleanAllTables } from '../src/test/create-test-data-source';
 describe('videos-complete-upload', () => {
   let app: INestApplication<App>;
   let dataSource: DataSource;
-  let channelRepository: Repository<Channel>;
   let videoRepository: Repository<Video>;
   let queue: Queue<VideoProcessJobData>;
 
@@ -45,7 +43,6 @@ describe('videos-complete-upload', () => {
     await app.init();
 
     dataSource = moduleFixture.get(DataSource);
-    channelRepository = dataSource.getRepository(Channel);
     videoRepository = dataSource.getRepository(Video);
     queue = moduleFixture.get(getQueueToken(VIDEO_PROCESSING_QUEUE));
   });

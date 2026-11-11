@@ -8,13 +8,22 @@ const PG_UNIQUE_VIOLATION = '23505';
 const NICKNAME_COLUMN = 'nickname';
 const MAX_RETRIES = 5;
 
+// TypeORM copies the driver error's own enumerable properties (code, detail,
+// ...) directly onto the QueryFailedError instance itself — see
+// node_modules/typeorm/error/QueryFailedError.js — so pg's error fields land
+// on `err`, not on `err.driverError`.
+interface PgQueryFailedError extends QueryFailedError {
+  code?: string;
+  detail?: string;
+}
+
 function isPgUniqueViolationOnColumn(err: unknown, column: string): boolean {
   if (!(err instanceof QueryFailedError)) return false;
-  const e = err as any;
+  const pgError = err as PgQueryFailedError;
   return (
-    e.code === PG_UNIQUE_VIOLATION &&
-    typeof e.detail === 'string' &&
-    e.detail.includes(column)
+    pgError.code === PG_UNIQUE_VIOLATION &&
+    typeof pgError.detail === 'string' &&
+    pgError.detail.includes(column)
   );
 }
 
