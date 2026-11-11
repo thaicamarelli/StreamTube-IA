@@ -167,6 +167,32 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
 
+## Videos Module
+
+Implements Fase 03 (upload, background processing, delivery). Three pieces:
+
+- `src/videos/` — `VideosController`/`VideosService` (entities `Video`, `VideoProcessingEvent`; DTOs; domain exceptions; `ffmpeg.util.ts`), `VideoProcessingConsumer` (BullMQ processor).
+- `src/storage/` — `StorageService`, wraps `@aws-sdk/client-s3` against MinIO (buckets `videos`, `thumbnails`). Presigned multipart upload/download for clients, direct upload/download for the worker.
+- `src/worker/`, `src/worker-main.ts` — standalone `WorkerModule`/entrypoint (no HTTP), bootstrapped via `NestFactory.createApplicationContext`. Runs in its own container (`video-worker`), the only one with `ffmpeg`/`ffprobe` installed — see "Worker-only commands" above.
+
+### Endpoints
+
+| Method & Route | Auth | Description |
+|---|---|---|
+| `POST /videos` | Required | Initiates upload: creates a `draft` row under the caller's channel, returns presigned per-part PUT URLs |
+| `POST /videos/:id/complete` | Required (owner) | Completes the multipart upload, sets `status: processing`, enqueues `video.process` |
+| `GET /videos/:id` | Public | Video details (`id`, `channelId`, `title`, `status`, `durationSeconds`, `errorReason`, `createdAt`) |
+| `GET /videos/:id/stream` | Public | `302` to a presigned inline URL (requires `status: ready`) |
+| `GET /videos/:id/download` | Public | `302` to a presigned attachment URL (requires `status: ready`) |
+
+### Status lifecycle
+
+`draft → processing → ready | error` on `Video.status`. A `VideoProcessingEvent` audit row is logged for every worker attempt (`processing` at the start, then `ready` or `error`); only the attempt that exhausts the queue's `attempts` (3, exponential backoff) moves `Video.status` to `error`.
+
+### Queue / worker
+
+BullMQ queue `video-processing` (Redis), job `video.process` (payload `{ videoId }`), enqueued by `VideosService.completeUpload` right before responding. `VideoProcessingConsumer.process()` downloads the source object, runs `ffprobe` for duration and `ffmpeg -vframes 1` for a thumbnail at 10% of duration, uploads the thumbnail to the `thumbnails` bucket, and updates `Video`.
+
 ## Code Conventions
 
 - **TypeScript:** `nodenext` module resolution, `ES2023` target, `strictNullChecks` on, `noImplicitAny` off
