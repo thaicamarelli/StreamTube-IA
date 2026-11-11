@@ -3,6 +3,8 @@
 **Status:** completed
 **SIs:** 9/9 completed
 
+**Post-phase cleanup:** dívida de lint pré-existente resolvida (262 → 0 erros) via override no `eslint.config.mjs` para arquivos de teste + 4 correções pontuais (3 `no-unused-vars` reais, 1 `any` em código de produção de Fase 02 em `channels.service.ts`). Ver commit "Resolve a divida de lint pre-existente (262 -> 0 erros)". Suite completa e e2e revalidados 100% verdes após a mudança.
+
 ### SI-03.1 — Infra: MinIO, Redis, Worker Container e Config Namespaces
 - **Status:** completed
 - **Tests:** 9 passing
