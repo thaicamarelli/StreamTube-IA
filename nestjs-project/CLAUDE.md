@@ -29,11 +29,21 @@ docker compose exec nestjs-api npm install
 
 # Run the dev server (watch mode)
 docker compose exec nestjs-api npm run start:dev
+
+# Run the video processing worker (standalone, no HTTP port — see worker-main.ts)
+docker compose exec video-worker npm run start:worker:dev
 ```
 
 Services:
+
 - `nestjs-api` — NestJS API, port `3000`
+- `video-worker` — consumes the `video-processing` BullMQ queue (SI-03.9); has `ffmpeg`/`ffprobe` installed, `nestjs-api` does not — run any ffmpeg-dependent test (`video-processing.consumer.integration-spec.ts`) via `docker compose exec video-worker`, not `nestjs-api`
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `redis` — BullMQ backend, port `6379`
+- `minio` — S3-compatible object storage, ports `9000`/`9001`, buckets `videos`/`thumbnails`
+- `mailpit` — SMTP test server, ports `1025`/`8025`
+
+Like `nestjs-api`, `video-worker`'s container does not auto-start the worker process on boot (its `Dockerfile.worker` CMD is an idle `tail -f /dev/null`, matching `nestjs-api`'s own dev-container convention) — `npm run start:worker:dev` (or `start:worker` for the compiled build) must be run manually inside the container, same as `start:dev` for the API.
 
 All verification and teardown commands run on the **host machine**:
 
@@ -73,6 +83,14 @@ npm run lint                             # ESLint with auto-fix
 npm run format                           # Prettier formatting
 ```
 
+### Worker-only commands (prefix with `docker compose exec video-worker`)
+
+```bash
+npm run start:worker:dev                 # Worker with hot-reload (ts-node)
+npm run start:worker                     # Run compiled build (dist/worker-main.js)
+npm test -- video-processing.consumer.integration-spec.ts   # Only ffmpeg-dependent test; nestjs-api lacks ffmpeg
+```
+
 ### Host-only commands (Docker / connectivity probes)
 
 ```bash
@@ -105,11 +123,11 @@ This applies to: `start:dev`, `start:prod`, `test:watch`, and any other persiste
 
 Choose the suffix by what the test really does, not by where the code under test lives. The suffix is a contract that drives Jest config (`testRegex`, parallelism), CI steps, and reader expectations.
 
-| Suffix                  | Purpose                                                              | DB / external I/O | Location                     |
-|-------------------------|----------------------------------------------------------------------|-------------------|------------------------------|
-| `*.spec.ts`             | **Unit** — pure logic, all collaborators mocked                      | Forbidden         | Next to the source file      |
-| `*.integration-spec.ts` | **Integration** — exercises real DB, real repositories, real modules | Required          | Next to the source file      |
-| `*.e2e-spec.ts`         | **End-to-end** — full HTTP cycle via `supertest`                     | Required          | `nestjs-project/test/`       |
+| Suffix                  | Purpose                                                              | DB / external I/O | Location                |
+| ----------------------- | -------------------------------------------------------------------- | ----------------- | ----------------------- |
+| `*.spec.ts`             | **Unit** — pure logic, all collaborators mocked                      | Forbidden         | Next to the source file |
+| `*.integration-spec.ts` | **Integration** — exercises real DB, real repositories, real modules | Required          | Next to the source file |
+| `*.e2e-spec.ts`         | **End-to-end** — full HTTP cycle via `supertest`                     | Required          | `nestjs-project/test/`  |
 
 A test that constructs a `TypeOrmModule.forRoot`, opens a connection, or hits the `db` service **must** be `*.integration-spec.ts`, never `*.spec.ts`. A test that boots the full Nest application and makes HTTP calls **must** be `*.e2e-spec.ts`.
 
@@ -148,6 +166,32 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
+
+## Videos Module
+
+Implements Fase 03 (upload, background processing, delivery). Three pieces:
+
+- `src/videos/` — `VideosController`/`VideosService` (entities `Video`, `VideoProcessingEvent`; DTOs; domain exceptions; `ffmpeg.util.ts`), `VideoProcessingConsumer` (BullMQ processor).
+- `src/storage/` — `StorageService`, wraps `@aws-sdk/client-s3` against MinIO (buckets `videos`, `thumbnails`). Presigned multipart upload/download for clients, direct upload/download for the worker.
+- `src/worker/`, `src/worker-main.ts` — standalone `WorkerModule`/entrypoint (no HTTP), bootstrapped via `NestFactory.createApplicationContext`. Runs in its own container (`video-worker`), the only one with `ffmpeg`/`ffprobe` installed — see "Worker-only commands" above.
+
+### Endpoints
+
+| Method & Route | Auth | Description |
+|---|---|---|
+| `POST /videos` | Required | Initiates upload: creates a `draft` row under the caller's channel, returns presigned per-part PUT URLs |
+| `POST /videos/:id/complete` | Required (owner) | Completes the multipart upload, sets `status: processing`, enqueues `video.process` |
+| `GET /videos/:id` | Public | Video details (`id`, `channelId`, `title`, `status`, `durationSeconds`, `errorReason`, `createdAt`) |
+| `GET /videos/:id/stream` | Public | `302` to a presigned inline URL (requires `status: ready`) |
+| `GET /videos/:id/download` | Public | `302` to a presigned attachment URL (requires `status: ready`) |
+
+### Status lifecycle
+
+`draft → processing → ready | error` on `Video.status`. A `VideoProcessingEvent` audit row is logged for every worker attempt (`processing` at the start, then `ready` or `error`); only the attempt that exhausts the queue's `attempts` (3, exponential backoff) moves `Video.status` to `error`.
+
+### Queue / worker
+
+BullMQ queue `video-processing` (Redis), job `video.process` (payload `{ videoId }`), enqueued by `VideosService.completeUpload` right before responding. `VideoProcessingConsumer.process()` downloads the source object, runs `ffprobe` for duration and `ffmpeg -vframes 1` for a thumbnail at 10% of duration, uploads the thumbnail to the `thumbnails` bucket, and updates `Video`.
 
 ## Code Conventions
 
